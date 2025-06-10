@@ -13,6 +13,8 @@ pub fn init_app_state() -> Data<AppState>{
     state
 }
 
+// TODO: ORGANIZE THE ROUTES
+
 #[macro_export]
 macro_rules! init_app {
     ($state:expr) => {
