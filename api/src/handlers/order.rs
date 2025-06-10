@@ -63,6 +63,12 @@ async fn create_order(payload:Json<CreateOrder>, state:Data<AppState>) -> impl R
     let _: RedisCustomResult<()> = conn.lpush(order.id.clone(), serialized);
 
     let message = pub_sub.get_message();
+    let res = pub_sub.unsubscribe(order.id.clone());
+
+    if res.is_err(){
+        return CustomApiError::internal_error();
+    }
+
     println!("received message from channel: {:?}, message:{:?}", order.id, message);
 
     // TODO: DESERIALIZE THE MESSAGE AND SEND THE CREATE ORDER RESPONSE TO THE CLIENT
