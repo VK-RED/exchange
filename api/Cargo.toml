@@ -8,3 +8,10 @@ actix-web = { workspace = true }
 dotenv = { workspace = true }
 derive_more = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+common ={ workspace = true}
+redis = { workspace = true }
+uuid ={ workspace = true }
+# r2d2 for connection pooling
+r2d2 = { workspace = true }
+r2d2_redis = { workspace = true }
