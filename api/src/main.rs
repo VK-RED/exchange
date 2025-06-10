@@ -1,21 +1,23 @@
-use actix_web::{App, HttpServer};
+use actix_web::{HttpServer};
 use dotenv::dotenv;
 
 pub mod handlers;
 pub mod errors;
+pub mod entrypoint;
+
 #[actix_web::main]
 async fn main() {
     dotenv().ok();
 
     let port = std::env::var("PORT").unwrap_or_else(|_e|String::from("8080"));
-    let address = format!("127.0.0.1:{}",port);
+    let state = entrypoint::init_app_state();
 
+    let address = format!("127.0.0.1:{}",port);
     println!("The server is running at the PORT : {}", port);
 
     HttpServer::new(
-        ||{
-            App::new()
-            .service(handlers::health::hello_world)
+        move||{
+            init_app!(state)
         }
     )
     .bind(address)
