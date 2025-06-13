@@ -1,5 +1,5 @@
 use actix_web::{post, web::{Data, Json}, HttpResponse, Responder};
-use common::types::order::{Order, OrderSide};
+use common::types::order::{MessageType, Order, OrderSide};
 use r2d2_redis::redis::{Commands};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -23,7 +23,7 @@ async fn create_order(payload:Json<CreateOrder>, state:Data<AppState>) -> impl R
     let id = Uuid::new_v4().to_string();
 
     let order = Order {
-        id,
+        id:id.clone(),
         market: payload.market.clone(),
         price: payload.price,
         quantity: payload.quantity,
@@ -31,9 +31,11 @@ async fn create_order(payload:Json<CreateOrder>, state:Data<AppState>) -> impl R
         user_id: payload.user_id.clone(),
     };
 
-    println!("order created : {:?}", order);
+    let message_type = MessageType::CreateOrder(order);
 
-    let serialized = serde_json::to_string(&order);
+    println!("order created : {:?}", message_type);
+
+    let serialized = serde_json::to_string(&message_type);
 
     if serialized.is_err() {
         return CustomApiError::internal_error();
@@ -54,22 +56,22 @@ async fn create_order(payload:Json<CreateOrder>, state:Data<AppState>) -> impl R
     let mut pub_sub = pub_sub.unwrap();
     let mut pub_sub = pub_sub.as_pubsub();
 
-    let res = pub_sub.subscribe(order.id.clone());
+    let res = pub_sub.subscribe(id.clone());
 
     if res.is_err(){
         return CustomApiError::internal_error();
     }
 
-    let _: RedisCustomResult<()> = conn.lpush(order.id.clone(), serialized);
+    let _: RedisCustomResult<()> = conn.lpush("orders", serialized);
 
     let message = pub_sub.get_message();
-    let res = pub_sub.unsubscribe(order.id.clone());
+    let res = pub_sub.unsubscribe(id.clone());
 
     if res.is_err(){
         return CustomApiError::internal_error();
     }
 
-    println!("received message from channel: {:?}, message:{:?}", order.id, message);
+    println!("received message from channel: {:?}, message:{:?}", id, message);
 
     // TODO: DESERIALIZE THE MESSAGE AND SEND THE CREATE ORDER RESPONSE TO THE CLIENT
     HttpResponse::Ok().json("Order Created Successfully !")
