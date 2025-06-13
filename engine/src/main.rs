@@ -1,63 +1,55 @@
 use std::{sync::{mpsc, Arc, Mutex}, thread};
-use common::types::order::MessageType;
-use r2d2_redis::{r2d2, redis::{Commands, RedisError}, RedisConnectionManager};
+use common::types::order::{MessageType};
+use r2d2_redis::{redis::{Commands, RedisError}};
 
-use crate::{engine::{Engine}, orderbook::OrderBook};
+use crate::{engine::{Engine}};
 
 mod orderbook;
 mod engine;
 
-// TOTAL THREADS = 1 MAIN + (1* NO.OF.ORDERBOOKS) + 1 USER REQ thread
+// TOTAL THREADS = 1 MAIN + (1* NO.OF.ORDERBOOKS ) + 1 USER REQ thread 
 
-#[tokio::main]
-async fn main() {
-
-    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_e|String::from("redis://127.0.0.1:6379"));
-    let manager = RedisConnectionManager::new(redis_url).expect("Failed to create redis manager");
-    let pool = r2d2::Pool::builder().build(manager).expect("Failed to create Redis Pool");
+fn main() {
 
     println!("Starting the engine");
 
-    let engine = Engine::init(pool);
-    let engine = Arc::new(Mutex::new(engine));
+    let engine = Engine::init();
     let mut markets_tx = Engine::init_market_tx();
+    let user_balances = engine.user_balances;
 
-    let markets:Vec<String>;
+    let user_balances = Arc::new(Mutex::new(user_balances));
 
-    // lock will be held if not scoped in a block
-    {
-        markets  = engine.lock().unwrap()
-        .orderbooks.iter()
-        .map(|ob| ob.market.clone())
-        .collect();
-    }
+    for mut orderbook in engine.orderbooks {
 
-
-    for market in markets.iter(){
-        
         let (tx, rx) = mpsc::channel::<MessageType>();
 
-        println!("Spawning thread for market : {:?}", market);
+        markets_tx.insert(orderbook.market.clone(), tx);
 
-        markets_tx.insert(market.clone(), tx);
+        let pool_clone = engine.redis_pool.clone();
+        let user_balances_clone = Arc::clone(&user_balances);
 
-        let engine_clone = Arc::clone(&engine);
+        println!("Spawning thread for the orderbook : {:?}", &orderbook.market);
 
         thread::spawn(move||{
-            loop {
+            loop{
                 let message = rx.recv();
+
                 match message {
+
+                    Ok(message_type) => {
+
+                        orderbook.process(
+                            message_type, 
+                            user_balances_clone.clone(),
+                            &pool_clone
+                        );
+                    },
                     Err(e) => {
                         println!("Error when receiving message from main : {:?}", e);
                     },
-                    Ok(val) => {
-                        OrderBook::process_order(val, Arc::clone(&engine_clone));
-                    }
                 }
             }
         });
-
-        
     }
 
     println!("Spawning a separate thread for handing non-order-processing requests ...");
@@ -69,52 +61,62 @@ async fn main() {
         }
     });
 
+    let pool = engine.redis_pool.clone();
+    let mut conn = pool.get().unwrap();
+    let queue_key = &engine.order_queue_key;
+
     loop {
 
-        let guard = engine.lock().unwrap();
-        let pool = &guard.redis_pool;
-        let mut conn = pool.get().unwrap();
+        let res: Result<Option<String>,RedisError> = conn.rpop(queue_key);
 
-        let queue_key = &guard.order_queue_key;
+        match res {
 
-        let res: Result<String,RedisError> = conn.rpop(queue_key);
+            Ok(message_res) => {
 
-        if res.is_ok(){
-            let message = res.unwrap();
+                if let Some(message) = message_res {
 
-            println!("received message : {}", message);
+                    println!("received message : {}", message);
 
-            let deserialized = Engine::deserialize_message(&message);
+                    let deserialized = Engine::deserialize_message(&message);
 
-            if deserialized.is_ok(){
+                    match deserialized {
 
-                let message_type = deserialized.unwrap();
+                        Ok(message_type) => {
 
-                let market = match &message_type{
-                    MessageType::CreateOrder(order) => order.market.clone(),
-                };
+                            match message_type {
 
-                let market_with_tx = markets_tx.get(&market);
-                
-                if market_with_tx.is_none(){
-                    let err_msg = format!("Cannot find tx for the market : {}", market);
-                    println!("{}",err_msg);
-                }
-                else{
-                    let tx = market_with_tx.unwrap();
-                    let tx_res = tx.send(message_type);
+                                MessageType::CreateOrder(order) => {
+                                    let market = &order.market;
+                                    let tx_res = markets_tx.get(market);
 
-                    if tx_res.is_err(){
-                        println!("error while sending message to orderbook : {}", tx_res.unwrap_err());
+                                    match tx_res {
+                                        Some(tx) => {
+
+                                            let tx_send_err = format!("Error while sending order to the orderbook : {}",market);
+                                            
+                                            tx.send(MessageType::CreateOrder(order))
+                                            .expect(&tx_send_err);
+                                        },
+                                        None => {
+                                            println!("No tx found for the market : {}", market);
+                                        }
+                                    }
+
+                                },
+                            }
+
+                        },
+                        Err(e) => {
+                            println!("Error while deserializing message : {}, error : {}", message, e);
+                        }
                     }
                 }
-            
+
+            },  
+            Err(e) => {
+                println!("Error while polling from the queue : {}", &e);
             }
-            else{
-                let err_message = deserialized.unwrap_err();
-                println!("Error while deserializing message : {}", err_message);
-            }
-        }  
+        }
 
     }
     
