@@ -7,6 +7,7 @@ pub enum EngineError {
 #[derive(Debug)]
 pub enum OrderBookError{
     UserNotFound,
+    ExecuteMarketOrder,
 }
 
 #[derive(Debug)]
