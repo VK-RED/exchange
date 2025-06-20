@@ -1,5 +1,5 @@
 use actix_web::{post, web::{Data, Json}, HttpResponse, Responder};
-use common::types::order::{MessageType, Order, OrderSide, OrderType};
+use common::types::order::{MessageType, Order, OrderSide, OrderType, Price};
 use r2d2_redis::redis::{Commands};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -12,7 +12,7 @@ pub struct CreateOrder{
     pub side: OrderSide,
     pub order_type: OrderType,
     pub market: String,
-    pub price: u64,
+    pub price: Price,
     pub quantity: u16
 }
 
