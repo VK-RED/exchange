@@ -6,13 +6,15 @@ pub enum OrderSide{
     Sell
 }
 
+pub type Price = u64;
+
 #[derive(Deserialize, Debug, Serialize, Clone)]
 pub struct Order {
     pub id: String,
     pub user_id: String,
     pub side: OrderSide,
     pub market: String,
-    pub price: u128,
+    pub price: Price,
     pub quantity: u16,
 }
 
@@ -21,6 +23,16 @@ impl PartialEq for Order {
         self.id == other.id
     }
 }
+
+impl Order {
+    pub fn get_opposing_side(&self) -> OrderSide{
+        match self.side {
+            OrderSide::Buy => OrderSide::Sell,
+            OrderSide::Sell => OrderSide::Buy,
+        }
+    }
+}
+
 
 #[derive(Deserialize, Debug, Clone, Serialize, PartialEq)]
 pub enum MessageType{
