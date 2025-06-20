@@ -6,6 +6,7 @@ use crate::{engine::{Engine}};
 
 mod orderbook;
 mod engine;
+mod errors;
 
 // TOTAL THREADS = 1 MAIN + (1* NO.OF.ORDERBOOKS ) + 1 USER REQ thread 
 
@@ -18,6 +19,8 @@ fn main() {
     let user_balances = engine.user_balances;
 
     let user_balances = Arc::new(Mutex::new(user_balances));
+
+    Engine::set_base_balance(Arc::clone(&user_balances));
 
     for mut orderbook in engine.orderbooks {
 
@@ -75,6 +78,7 @@ fn main() {
 
                 if let Some(message) = message_res {
 
+                    println!("--------------------------------------------------------");
                     println!("received message : {}", message);
 
                     let deserialized = Engine::deserialize_message(&message);

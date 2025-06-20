@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::mpsc};
+use std::{collections::HashMap, sync::{mpsc, Arc, Mutex}};
 
 use common::types::order::MessageType;
 use r2d2_redis::{r2d2::{self, Pool}, RedisConnectionManager};
@@ -6,12 +6,6 @@ use r2d2_redis::{r2d2::{self, Pool}, RedisConnectionManager};
 use crate::orderbook::OrderBook;
 
 pub type MarketTx = mpsc::Sender<MessageType>;
-
-#[derive(Clone, Debug)]
-pub struct AssetBalance{
-    pub available_amount: u128,
-    pub locked_amount: u128,
-}
 
 pub type UserAssetBalance = HashMap<String, HashMap<String, AssetBalance>>;
 
@@ -32,16 +26,16 @@ impl Engine {
 
         let redis_pool = Self::init_redis_pool();
 
-        let markets = [
-            "SOL_USDC".to_string(),
-            "BONK_USDC".to_string(),
-            "JUP_USDC".to_string()
+        let assets = [
+            ("SOL".to_string(),9),
+            ("BONK".to_string(),8),
+            ("JUP".to_string(), 6)
         ];
 
         let mut orderbooks = vec![];
 
-        for market in markets {
-            orderbooks.push(OrderBook::new(market.clone()));
+        for (asset, decimals) in assets {
+            orderbooks.push(OrderBook::new(asset.clone(),decimals));
         }
 
         // Initially all the balances will be zero
@@ -56,6 +50,61 @@ impl Engine {
             redis_pool, 
             order_queue_key,
         }
+    }
+
+    /// sets the initial balance for dummy users
+    pub fn set_base_balance(user_balances:Arc<Mutex<UserAssetBalance>>){
+        let mut guard = user_balances.lock().unwrap();
+
+        let user_ids = [
+            "random1".to_string(),
+            "random2".to_string(),
+            "random32".to_string(),
+        ];
+
+        for user_id in user_ids {
+            guard.insert(user_id.clone(), HashMap::new());
+
+            let assets = [
+                ("SOL".to_string(),9),
+                ("BONK".to_string(),8),
+                ("JUP".to_string(), 6),
+                ("USDC".to_string(), 6)
+
+            ];
+
+            for (asset, decimal) in assets {
+
+                let base = 10_u64;
+                let lamports = base.pow(decimal);
+
+                let amount = 10000 * lamports;
+
+                let asset_balance = guard.get_mut(&user_id).unwrap();
+
+                match asset_balance.get_mut(&asset){
+                    Some(_balance) => {
+                        println!("wtf");
+                    },
+                    None => {
+                        let balance = AssetBalance{
+                            available_amount:amount,
+                            locked_amount:0,
+                        };
+
+                        let amount_set = amount / lamports;
+
+                        println!("set {} {} for user : {} ", amount_set, asset, user_id);
+
+                        asset_balance.insert(asset, balance);
+                    }   
+                }
+
+            }
+
+        }
+
+        
     }
 
     pub fn init_redis_pool() -> Pool<RedisConnectionManager>{
@@ -76,4 +125,21 @@ impl Engine {
     }
 
     
+}
+
+#[derive(Clone, Debug)]
+pub struct AssetBalance{
+    pub available_amount: u64,
+    pub locked_amount: u64,
+}
+
+impl AssetBalance {
+    pub fn new() -> Self{
+        Self {
+            available_amount: 0,
+            locked_amount:0
+        }
+    }
+
+
 }
