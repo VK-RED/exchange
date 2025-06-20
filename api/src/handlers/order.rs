@@ -11,7 +11,7 @@ pub struct CreateOrder{
     pub user_id: String,
     pub side: OrderSide,
     pub market: String,
-    pub price: u128,
+    pub price: u64,
     pub quantity: u16,
 }
 
