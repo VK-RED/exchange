@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::{Arc, Mutex}};
 
-use common::types::order::{MessageType, Order, OrderSide, Price};
+use common::types::order::{MessageType, Order, OrderSide, OrderType, Price};
 use r2d2_redis::{r2d2::{Pool}, redis::Commands, RedisConnectionManager};
 use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{BalanceError, EngineError, OrderBookError}};
 
@@ -77,7 +77,7 @@ impl OrderBook {
         let mut guard =  user_balances.lock().unwrap();
         let user_asset_balance = guard.get_mut(&order.user_id);
 
-        let mut asset;
+        let asset;
 
         match user_asset_balance {
 
@@ -402,6 +402,61 @@ impl OrderBook {
 
     }
 
+
+    pub fn can_place_market_order(&self, order:&Order) -> Result<(), EngineError> {
+
+        let price = order.price;
+        let quantities_to_match = order.quantity;
+
+        let orderside = match order.side {
+            OrderSide::Buy => {
+                &self.asks
+            },
+            OrderSide::Sell => {
+                &self.bids
+            }
+        };
+
+        match orderside.get(&price) {
+            None => {
+                // throw error order cannot be matched
+                println!("
+                    cant place market order : {} as 0 orders available on price : {}",
+                    order.id,
+                    order.price,
+                );
+
+                Err(EngineError::OrderBookError(OrderBookError::ExecuteMarketOrder))
+                
+            },
+            Some(orders) => {
+
+                let mut available_quantities: u16 = 0;
+
+                for order in orders.iter(){
+                    let quantity = order.quantity;
+                    available_quantities += quantity;
+                }
+
+                if available_quantities >= quantities_to_match {
+                    Ok(())
+                }
+                else{
+                    println!(
+                        "cant place market order :{} as expected: {} available: {} on price : {}",
+                        order.id,
+                        quantities_to_match, 
+                        available_quantities,
+                        order.price,
+                    );
+
+                    Err(EngineError::OrderBookError(OrderBookError::ExecuteMarketOrder))
+                }
+
+            }
+        }
+    }
+
     pub fn process_order(
         &mut self, 
         mut order:Order,
@@ -417,6 +472,10 @@ impl OrderBook {
         */
 
         let maker_side = order.get_opposing_side();
+
+        if order.order_type == OrderType::Market {
+            self.can_place_market_order(&order)?;
+        }
 
         self.validate_and_lock_user_balance(&order, &user_balances)?;
 

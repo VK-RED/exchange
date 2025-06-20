@@ -1,5 +1,5 @@
 use actix_web::{post, web::{Data, Json}, HttpResponse, Responder};
-use common::types::order::{MessageType, Order, OrderSide};
+use common::types::order::{MessageType, Order, OrderSide, OrderType};
 use r2d2_redis::redis::{Commands};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -10,9 +10,10 @@ use crate::{entrypoint::AppState, errors::{CustomApiError}};
 pub struct CreateOrder{
     pub user_id: String,
     pub side: OrderSide,
+    pub order_type: OrderType,
     pub market: String,
     pub price: u64,
-    pub quantity: u16,
+    pub quantity: u16
 }
 
 pub type RedisCustomResult<T> =  Result<T, r2d2_redis::redis::RedisError>;
@@ -29,6 +30,7 @@ async fn create_order(payload:Json<CreateOrder>, state:Data<AppState>) -> impl R
         quantity: payload.quantity,
         side: payload.side,
         user_id: payload.user_id.clone(),
+        order_type: payload.order_type,
     };
 
     let message_type = MessageType::CreateOrder(order);

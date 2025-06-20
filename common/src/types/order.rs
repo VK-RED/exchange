@@ -6,6 +6,12 @@ pub enum OrderSide{
     Sell
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub enum OrderType{
+    Limit,
+    Market,
+}
+
 pub type Price = u64;
 
 #[derive(Deserialize, Debug, Serialize, Clone)]
@@ -14,6 +20,7 @@ pub struct Order {
     pub user_id: String,
     pub side: OrderSide,
     pub market: String,
+    pub order_type: OrderType,
     pub price: Price,
     pub quantity: u16,
 }
