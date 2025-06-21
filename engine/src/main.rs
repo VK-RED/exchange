@@ -1,12 +1,13 @@
 use std::{sync::{mpsc, Arc, Mutex}, thread};
-use common::types::order::{MessageType};
+use common::message::{message_from_api::MessageFromApi, message_from_engine::OrderPlacedResponse};
 use r2d2_redis::{redis::{Commands, RedisError}};
 
-use crate::{engine::{Engine}};
+use crate::{engine::Engine, orderbook::RedisResponse};
 
 mod orderbook;
 mod engine;
 mod errors;
+mod order;
 
 // TOTAL THREADS = 1 MAIN + (1* NO.OF.ORDERBOOKS ) + 1 USER REQ thread 
 
@@ -24,7 +25,7 @@ fn main() {
 
     for mut orderbook in engine.orderbooks {
 
-        let (tx, rx) = mpsc::channel::<MessageType>();
+        let (tx, rx) = mpsc::channel::<MessageFromApi>();
 
         markets_tx.insert(orderbook.market.clone(), tx);
 
@@ -89,7 +90,7 @@ fn main() {
 
                             match message_type {
 
-                                MessageType::CreateOrder(order) => {
+                                MessageFromApi::CreateOrder(order) => {
                                     let market = &order.market;
                                     let tx_res = markets_tx.get(market);
 
@@ -98,10 +99,35 @@ fn main() {
 
                                             let tx_send_err = format!("Error while sending order to the orderbook : {}",market);
                                             
-                                            tx.send(MessageType::CreateOrder(order))
+                                            tx.send(MessageFromApi::CreateOrder(order))
                                             .expect(&tx_send_err);
                                         },
                                         None => {
+
+                                            let order_id = &order.id;
+
+                                            let failed_order_placed = OrderPlacedResponse{
+                                                executed_quantiy:0,
+                                                fills:vec![],
+                                                order_id:order.id.clone(),
+                                            };
+
+                                            let serialized = serde_json::to_string(&failed_order_placed);
+
+                                            let error_message = "Error while placing order".to_string();
+
+                                            let message;
+                                            if serialized.is_err(){
+                                                message = error_message;
+                                            }
+                                            else{
+                                                message = serialized.unwrap();
+                                            }
+                                            let redis_response:RedisResponse = conn.publish(order_id, message);
+
+                                            if let Err(e) = redis_response {
+                                                println!("Error while publishing to the order id : {}", e);
+                                            }
                                             println!("No tx found for the market : {}", market);
                                         }
                                     }

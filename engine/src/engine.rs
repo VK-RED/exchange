@@ -1,11 +1,12 @@
 use std::{collections::HashMap, sync::{mpsc, Arc, Mutex}};
 
-use common::types::order::MessageType;
+use common::message::message_from_api::MessageFromApi;
 use r2d2_redis::{r2d2::{self, Pool}, RedisConnectionManager};
 
 use crate::orderbook::OrderBook;
 
-pub type MarketTx = mpsc::Sender<MessageType>;
+// TODO: SEPARATE IT FROM USER AND ORDER RELATED STUFFS
+pub type MarketTx = mpsc::Sender<MessageFromApi>;
 
 pub type UserAssetBalance = HashMap<String, HashMap<String, AssetBalance>>;
 
@@ -119,8 +120,8 @@ impl Engine {
         HashMap::new()
     }
 
-    pub fn deserialize_message(message:&str)->Result<MessageType, serde_json::Error>{
-        let deserialized = serde_json::from_str::<MessageType>(message);
+    pub fn deserialize_message(message:&str)->Result<MessageFromApi, serde_json::Error>{
+        let deserialized = serde_json::from_str::<MessageFromApi>(message);
         deserialized   
     }
 

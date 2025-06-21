@@ -1,5 +1,17 @@
 use actix_web::{post, web::{Data, Json}, HttpResponse, Responder};
-use common::types::order::{MessageType, Order, OrderSide, OrderType, Price};
+use common::{
+    message::{
+        message_from_api::{
+            CreateOrderPayload, 
+            MessageFromApi
+        }, 
+        message_from_engine::OrderPlacedResponse
+    }, 
+    types::order::{
+        OrderSide, 
+        OrderType, 
+        Price
+    }};
 use r2d2_redis::redis::{Commands};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -23,7 +35,7 @@ async fn create_order(payload:Json<CreateOrder>, state:Data<AppState>) -> impl R
 
     let id = Uuid::new_v4().to_string();
 
-    let order = Order {
+    let order = CreateOrderPayload {
         id:id.clone(),
         market: payload.market.clone(),
         price: payload.price,
@@ -33,7 +45,7 @@ async fn create_order(payload:Json<CreateOrder>, state:Data<AppState>) -> impl R
         order_type: payload.order_type,
     };
 
-    let message_type = MessageType::CreateOrder(order);
+    let message_type = MessageFromApi::CreateOrder(order);
 
     println!("order created : {:?}", message_type);
 
@@ -73,9 +85,24 @@ async fn create_order(payload:Json<CreateOrder>, state:Data<AppState>) -> impl R
         return CustomApiError::internal_error();
     }
 
-    println!("received message from channel: {:?}, message:{:?}", id, message);
+    let mut result = OrderPlacedResponse {
+        order_id:id,
+        executed_quantiy:0,
+        fills:vec![]
+    };
 
-    // TODO: DESERIALIZE THE MESSAGE AND SEND THE CREATE ORDER RESPONSE TO THE CLIENT
-    HttpResponse::Ok().json("Order Created Successfully !")
+    if let Ok(data) = message {
+        let payload:RedisCustomResult<String> = data.get_payload();
+
+        if let Ok(val) = payload {
+            let deserialized: Result<OrderPlacedResponse, serde_json::Error> = serde_json::from_str(&val);
+            
+            if let Ok(deserial_data) = deserialized {
+                result = deserial_data;
+            }
+        }
+    }
+
+    HttpResponse::Ok().json(result)
 
 }

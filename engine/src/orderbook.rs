@@ -1,8 +1,7 @@
 use std::{collections::HashMap, sync::{Arc, Mutex}};
-
-use common::types::order::{MessageType, Order, OrderSide, OrderType, Price};
+use common::{message::{message_from_api::MessageFromApi, message_from_engine::OrderPlacedResponse}, types::order::{Fill, OrderSide, OrderType}};
 use r2d2_redis::{r2d2::{Pool}, redis::Commands, RedisConnectionManager};
-use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{BalanceError, EngineError, OrderBookError}};
+use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{BalanceError, EngineError, OrderBookError}, order::{Order, Price}};
 
 pub type RedisResponse = Result<(), r2d2_redis::redis::RedisError>;
 
@@ -16,14 +15,6 @@ pub struct OrderBook {
     pub bids: HashMap<Price,Vec<Order>>,    
     pub asks: HashMap<Price,Vec<Order>>,
     pub last_price: Price,
-}
-
-#[derive(Debug, Clone)]
-pub struct Fill {
-    pub order_id: String,
-    pub quantity: u16,
-    pub maker_id: String,
-    pub price: Price
 }
 
 #[derive(Debug)]
@@ -311,7 +302,7 @@ impl OrderBook {
         &self,
         user_id:String,
         order_side:OrderSide,
-        filled_orders: Vec<Fill>,
+        filled_orders: &Vec<Fill>,
         user_balances:Arc<Mutex<UserAssetBalance>>,
     ){
 
@@ -461,7 +452,7 @@ impl OrderBook {
         &mut self, 
         mut order:Order,
         user_balances:Arc<Mutex<UserAssetBalance>>,
-    ) -> Result<(), EngineError>{
+    ) -> Result<OrderPlacedResponse, EngineError>{
 
         /*
             - Check user has enough balance
@@ -487,6 +478,7 @@ impl OrderBook {
         
         self.remove_complete_filled_orders(complete_fill_orders, maker_side);
 
+        let filled_quantity = order.quantity - remaining_quantity;
         // update the order quantity after matching
         order.quantity = remaining_quantity;
 
@@ -498,16 +490,22 @@ impl OrderBook {
         self.settle_user_balance(
             order.user_id, 
             order.side, 
-            filled_orders, 
+            &filled_orders, 
             user_balances
         );
 
-        Ok(())
+        let order_placed = OrderPlacedResponse {
+            executed_quantiy: filled_quantity,
+            order_id: order.id,
+            fills: filled_orders,
+        };
+
+        Ok(order_placed)
     }
 
     pub fn process(
             &mut self, 
-            message_type:MessageType, 
+            message_type:MessageFromApi, 
             user_balances:Arc<Mutex<UserAssetBalance>>,
             pool:&Pool<RedisConnectionManager>
     ){
@@ -515,19 +513,29 @@ impl OrderBook {
 
         match message_type {
 
-            MessageType::CreateOrder(order) => {
+            MessageFromApi::CreateOrder(payload) => {
 
+                let order = Order::from_create_order_payload(payload);
                 let order_id = order.id.clone();
 
-                
                 let res = self.process_order(order, user_balances);
+                let error_message = "Error while placing order".to_string();
 
                 match res {
-                    Ok(()) => {
-                        let publish_message = "Order completed Successfully";
-                        let redis_response:RedisResponse = conn.publish(&order_id, publish_message);
+                    Ok(order_placed) => {
+                        
+                        let serialized = serde_json::to_string(&order_placed);
+                        
+                        let message;
 
-                        println!("published message to order id : {}", order_id);
+                        if serialized.is_err(){
+                            message = error_message;
+                        }
+                        else{
+                            message = serialized.unwrap();
+                        }
+
+                        let redis_response:RedisResponse = conn.publish(&order_id, message);
 
                         if let Err(e) = redis_response {
                             println!("Error while publishing to the order id : {}", e);
@@ -536,10 +544,23 @@ impl OrderBook {
                     Err(e) => {
                         println!("Error while executing orders : {:?}", e);
 
-                        let publish_message = "Order cant be placed now";
-                        let redis_response:RedisResponse = conn.publish(&order_id, publish_message);
+                        let failed_order_placed = OrderPlacedResponse{
+                            executed_quantiy:0,
+                            fills:vec![],
+                            order_id:order_id.clone(),
+                        };
 
-                        println!("published message to order id : {}", order_id);
+                        let serialized = serde_json::to_string(&failed_order_placed);
+
+                        let message;
+                        if serialized.is_err(){
+                            message = error_message;
+                        }
+                        else{
+                            message = serialized.unwrap();
+                        }
+
+                        let redis_response:RedisResponse = conn.publish(&order_id, message);
 
                         if let Err(e) = redis_response {
                             println!("Error while publishing to the order id : {}", e);
