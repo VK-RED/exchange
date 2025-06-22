@@ -9,6 +9,6 @@ pub enum MessageFromEngine{
 #[derive(Serialize, Deserialize, Debug)]
 pub struct OrderPlacedResponse {
     pub order_id: String,
-    pub executed_quantiy: Quantity,
+    pub executed_quantity: Quantity,
     pub fills: Vec<Fill>
 }

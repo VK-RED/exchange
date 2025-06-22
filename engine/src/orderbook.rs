@@ -495,7 +495,7 @@ impl OrderBook {
         );
 
         let order_placed = OrderPlacedResponse {
-            executed_quantiy: filled_quantity,
+            executed_quantity: filled_quantity,
             order_id: order.id,
             fills: filled_orders,
         };
@@ -545,7 +545,7 @@ impl OrderBook {
                         println!("Error while executing orders : {:?}", e);
 
                         let failed_order_placed = OrderPlacedResponse{
-                            executed_quantiy:0,
+                            executed_quantity:0,
                             fills:vec![],
                             order_id:order_id.clone(),
                         };

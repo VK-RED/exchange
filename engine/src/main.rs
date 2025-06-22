@@ -107,7 +107,7 @@ fn main() {
                                             let order_id = &order.id;
 
                                             let failed_order_placed = OrderPlacedResponse{
-                                                executed_quantiy:0,
+                                                executed_quantity:0,
                                                 fills:vec![],
                                                 order_id:order.id.clone(),
                                             };

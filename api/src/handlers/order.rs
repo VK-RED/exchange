@@ -87,7 +87,7 @@ async fn create_order(payload:Json<CreateOrder>, state:Data<AppState>) -> impl R
 
     let mut result = OrderPlacedResponse {
         order_id:id,
-        executed_quantiy:0,
+        executed_quantity:0,
         fills:vec![]
     };
 
