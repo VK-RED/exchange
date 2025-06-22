@@ -12,6 +12,7 @@ pub struct OrderBook {
     pub base_asset: String,
     pub base_decimals: u8,
     pub market: String,
+    pub trade_id: u32,
     pub bids: HashMap<Price,Vec<Order>>,    
     pub asks: HashMap<Price,Vec<Order>>,
     pub last_price: Price,
@@ -40,6 +41,7 @@ impl OrderBook {
             asks,
             base_decimals,
             last_price:0,
+            trade_id:0,
         }
     }
 
@@ -204,6 +206,9 @@ impl OrderBook {
         let mut fill_orders: Vec<Fill> = vec![];
         let mut complete_fill_orders: Vec<CompleteFill>= vec![];
 
+        let mut trade_id = self.trade_id;
+        let mut last_price = self.last_price;
+
         let opposing_side_with_orders = match order.side{
 
             OrderSide::Buy => {
@@ -232,10 +237,14 @@ impl OrderBook {
                 let filled_quantity = opposing_order.quantity.min(remaining_quantity);
                 remaining_quantity -= filled_quantity;
                 opposing_order.quantity -= filled_quantity;
-
+                
+                trade_id+=1;
+                last_price = *opposing_price;
+                
                 let fill = Fill {
                     maker_id: opposing_order.user_id.clone(),
                     order_id: opposing_order.id.clone(),
+                    trade_id,
                     price: *opposing_price,
                     quantity: filled_quantity,
                 };   
@@ -256,6 +265,11 @@ impl OrderBook {
                 
             }
         }
+
+        // FINALLY SET THE TRADEID BACK TO ORDERBOOK'S TRADEID
+        self.trade_id = trade_id;
+        self.last_price = last_price;
+    
         if remaining_quantity != order.quantity {
             let filled_quantity = order.quantity - remaining_quantity;
             println!("filled {} quantities of {} for order : {}", filled_quantity, order.quantity, &order.id);
