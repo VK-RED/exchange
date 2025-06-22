@@ -1,4 +1,4 @@
-use common::{message::message_from_api::CreateOrderPayload, types::order::{OrderSide, OrderType}};
+use common::{message::api::CreateOrderPayload, types::order::{OrderSide, OrderType}};
 use serde::{Deserialize, Serialize};
 
 pub type Price = u64;

@@ -1,11 +1,11 @@
 use actix_web::{post, web::{Data, Json}, HttpResponse, Responder};
 use common::{
     message::{
-        message_from_api::{
+        api::{
             CreateOrderPayload, 
             MessageFromApi
         }, 
-        message_from_engine::OrderPlacedResponse
+        engine::OrderPlacedResponse
     }, 
     types::order::{
         OrderSide, 

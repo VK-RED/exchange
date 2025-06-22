@@ -1,5 +1,5 @@
 use std::{collections::HashMap, sync::{Arc, Mutex}};
-use common::{message::{message_from_api::MessageFromApi, message_from_engine::OrderPlacedResponse}, types::order::{Fill, OrderSide, OrderType}};
+use common::{message::{api::MessageFromApi, engine::OrderPlacedResponse}, types::order::{Fill, OrderSide, OrderType}};
 use r2d2_redis::{r2d2::{Pool}, redis::Commands, RedisConnectionManager};
 use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{BalanceError, EngineError, OrderBookError}, order::{Order, Price}};
 

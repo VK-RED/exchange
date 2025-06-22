@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::{mpsc, Arc, Mutex}};
 
-use common::message::message_from_api::MessageFromApi;
+use common::message::api::MessageFromApi;
 use r2d2_redis::{r2d2::{self, Pool}, RedisConnectionManager};
 
 use crate::orderbook::OrderBook;

@@ -1,5 +1,5 @@
 use std::{sync::{mpsc, Arc, Mutex}, thread};
-use common::message::{message_from_api::MessageFromApi, message_from_engine::OrderPlacedResponse};
+use common::message::{api::MessageFromApi, engine::OrderPlacedResponse};
 use r2d2_redis::{redis::{Commands, RedisError}};
 
 use crate::{engine::Engine, orderbook::RedisResponse};
