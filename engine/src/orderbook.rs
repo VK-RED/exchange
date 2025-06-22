@@ -1,5 +1,5 @@
 use std::{collections::HashMap, sync::{Arc, Mutex}};
-use common::{message::{api::MessageFromApi, engine::OrderPlacedResponse}, types::order::{Fill, OrderSide, OrderType}};
+use common::{message::{api::MessageFromApi, engine::{OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType}};
 use r2d2_redis::{r2d2::{Pool}, redis::Commands, RedisConnectionManager};
 use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{BalanceError, EngineError, OrderBookError}, order::{Order, Price}};
 
@@ -240,7 +240,7 @@ impl OrderBook {
                 
                 trade_id+=1;
                 last_price = *opposing_price;
-                
+
                 let fill = Fill {
                     maker_id: opposing_order.user_id.clone(),
                     order_id: opposing_order.id.clone(),
@@ -507,6 +507,12 @@ impl OrderBook {
             &filled_orders, 
             user_balances
         );
+
+        let filled_orders:Vec<OrderFill> = filled_orders.iter().map(|o| OrderFill{
+            price: o.price,
+            quantity: o.quantity,
+            trade_id: o.trade_id,
+        }).collect();
 
         let order_placed = OrderPlacedResponse {
             executed_quantity: filled_quantity,
