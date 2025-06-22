@@ -6,6 +6,7 @@ pub type Quantity = u16;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Fill{
     pub order_id: String,
+    pub trade_id: u32,
     pub quantity: Quantity,
     pub maker_id: String,
     pub price: Price
