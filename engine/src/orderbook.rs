@@ -1,11 +1,13 @@
 use std::{collections::HashMap, sync::{Arc, Mutex}};
-use common::{message::{api::MessageFromApi, engine::{OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType}};
+use common::{message::{api::MessageFromApi, engine::{OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType, Price}};
 use r2d2_redis::{r2d2::{Pool}, redis::Commands, RedisConnectionManager};
-use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{BalanceError, EngineError, OrderBookError}, order::{Order, Price}};
+use rust_decimal::{dec, Decimal, prelude::ToPrimitive};
+use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{BalanceError, EngineError, OrderBookError}, order::{Order}};
 
 pub type RedisResponse = Result<(), r2d2_redis::redis::RedisError>;
 
 const QUOTE:&str = "USDC";
+const QUOTE_LAMPORTS:u64 = 1000_000;
 
 #[derive(Debug, Clone)]
 pub struct OrderBook {
@@ -40,7 +42,7 @@ impl OrderBook {
             bids,
             asks,
             base_decimals,
-            last_price:0,
+            last_price:dec!(0),
             trade_id:0,
         }
     }
@@ -62,8 +64,8 @@ impl OrderBook {
         let base_asset = &self.base_asset;
         let quote_asset = QUOTE;        
 
-        let total_price: u64;
-        let order_quantity = order.quantity as u64;
+        let mut total_price;
+        let order_quantity = order.quantity;
 
         let base_lamports = self.get_base_lamports();
 
@@ -82,7 +84,16 @@ impl OrderBook {
 
                         asset = quote_asset;
                         
-                        total_price = order.price * order_quantity;
+                        // consider this
+                        // total_price = 150.02  * 2.5 * 1000_000
+                        // total_price = 375050000.000
+                        total_price = order.price * order_quantity * Decimal::from(QUOTE_LAMPORTS);
+
+                        // the total_price can become a decimal even after multiplying with lamports
+                        // so use trunc() to cut the extra decimals
+                        // ex: 150234567.43435345 => 150234567
+
+                        total_price = total_price.trunc();
 
                         if user_balance.get(quote_asset).is_none(){
                             user_balance.insert(quote_asset.to_string(), AssetBalance::new());
@@ -95,7 +106,16 @@ impl OrderBook {
 
                         asset = base_asset;
 
-                        total_price = order_quantity * base_lamports;
+                        // consider this
+                        // total_price = 150.02  * 1000_000
+                        // total_price = 150020000.000
+
+                        total_price = order_quantity * Decimal::from(base_lamports);
+
+                        // the total_price can become a decimal even after multiplying with lamports
+                        // so use trunc() to cut the extra decimals
+                        // ex: 15023456723.43435345 => 15023456723
+                        total_price = total_price.trunc();
 
                         if user_balance.get(base_asset).is_none() {
                             user_balance.insert(base_asset.to_string(), AssetBalance::new());
@@ -105,12 +125,14 @@ impl OrderBook {
                     },
                 };
 
-                println!("{} {} balance before lock : {:?}", &order.user_id, &asset, asset_balance);
-                println!("amount to lock : {}", total_price);
+                let total_amount = total_price.to_u64().expect("None while converting total_price in locking user balance");
 
-                if asset_balance.available_amount >= total_price {
-                    asset_balance.locked_amount += total_price;
-                    asset_balance.available_amount -= total_price;
+                println!("{} {} balance before lock : {:?}", &order.user_id, &asset, asset_balance);
+                println!("amount to lock : {}", total_amount);
+
+                if asset_balance.available_amount >= total_amount {
+                    asset_balance.locked_amount += total_amount;
+                    asset_balance.available_amount -= total_amount;
 
                     println!("{} {} balance after lock : {:?}", &order.user_id, &asset, asset_balance);
                 }
@@ -134,15 +156,15 @@ impl OrderBook {
 
     }
 
-    pub fn get_desc_bids(&mut self) -> Vec<(&u64, &mut Vec<Order>)>{
-        let mut bids:Vec<(&u64, &mut Vec<Order>)> = self.bids.iter_mut().collect();
+    pub fn get_desc_bids(&mut self) -> Vec<(&Price, &mut Vec<Order>)>{
+        let mut bids:Vec<(&Price, &mut Vec<Order>)> = self.bids.iter_mut().collect();
         bids.sort_by(|a, b| b.0.cmp(a.0));
         bids
     }
 
-    pub fn get_asc_asks(&mut self) -> Vec<(&u64, &mut Vec<Order>)>{
+    pub fn get_asc_asks(&mut self) -> Vec<(&Price, &mut Vec<Order>)>{
 
-        let mut asks:Vec<(&u64, &mut Vec<Order>)> = self.asks.iter_mut().collect();
+        let mut asks:Vec<(&Price, &mut Vec<Order>)> = self.asks.iter_mut().collect();
         asks.sort_by(|a, b| a.0.cmp(b.0));
         asks
     }
@@ -199,7 +221,7 @@ impl OrderBook {
     pub fn match_opposing_orders(
         &mut self,
         order:&Order
-    ) -> (u16, Vec<Fill>, Vec<CompleteFill>){
+    ) -> (Price, Vec<Fill>, Vec<CompleteFill>){
 
         let mut remaining_quantity = order.quantity;
         
@@ -212,7 +234,7 @@ impl OrderBook {
         let opposing_side_with_orders = match order.side{
 
             OrderSide::Buy => {
-                let asks: Vec<(&u64, &mut Vec<Order>)> = self.get_asc_asks();
+                let asks: Vec<(&Price, &mut Vec<Order>)> = self.get_asc_asks();
                 asks
             },
             OrderSide::Sell => {
@@ -230,7 +252,7 @@ impl OrderBook {
 
             for opposing_order in opposing_orders {
 
-                if remaining_quantity == 0{
+                if remaining_quantity == dec!(0){
                     break;
                 }
 
@@ -253,7 +275,7 @@ impl OrderBook {
 
                 fill_orders.push(fill);
 
-                if opposing_order.quantity == 0 {
+                if opposing_order.quantity == dec!(0) {
 
                     let complete_fill = CompleteFill {
                         order_id: opposing_order.id.clone(),
@@ -330,38 +352,45 @@ impl OrderBook {
 
             let maker_asset_balance = guard.get_mut(&filled_order.maker_id).unwrap();
             
-            let quantity = filled_order.quantity as u64;
-
-            // Price will already be in lamports
+            let quantity = filled_order.quantity;
             let price = filled_order.price;
 
             let base_lamports = self.get_base_lamports();
 
-            let base_amount_lamports = quantity * base_lamports;
-            let quote_amount_lamports = quantity * price;  
+            let base_amount_in_lamports = quantity * Decimal::from(base_lamports);
+            let quote_amount_in_lamports = quantity * price * Decimal::from(QUOTE_LAMPORTS);  
 
-            user_base_amount += base_amount_lamports;
-            user_quote_amount += quote_amount_lamports;
+            // convert to u64 
+            let base_amount_in_lamports = base_amount_in_lamports
+            .to_u64()
+            .expect("None while converting base amount in settling user balance");
+
+            let quote_amount_in_lamports = quote_amount_in_lamports
+            .to_u64()
+            .expect("None while converting qupte amount in settling user balance");
+
+            user_base_amount += base_amount_in_lamports;
+            user_quote_amount += quote_amount_in_lamports;
 
             match order_side {
                 OrderSide::Buy => {
                     // Increment the Quote and Decrement the Base
                     
                     let maker_base_balance = maker_asset_balance.get_mut(&self.base_asset).unwrap();
-                    maker_base_balance.locked_amount -= base_amount_lamports;
+                    maker_base_balance.locked_amount -= base_amount_in_lamports;
 
                     let maker_quote_balance = maker_asset_balance.get_mut(QUOTE).unwrap();
-                    maker_quote_balance.available_amount += quote_amount_lamports;
+                    maker_quote_balance.available_amount += quote_amount_in_lamports;
                     
                 },
                 OrderSide::Sell => {
                     // Increment the Base and decrement the Quote
 
                     let maker_base_balance = maker_asset_balance.get_mut(&self.base_asset).unwrap();
-                    maker_base_balance.available_amount += base_amount_lamports;
+                    maker_base_balance.available_amount += base_amount_in_lamports;
 
                     let maker_quote_balance = maker_asset_balance.get_mut(QUOTE).unwrap();
-                    maker_quote_balance.locked_amount -= quote_amount_lamports;
+                    maker_quote_balance.locked_amount -= quote_amount_in_lamports;
                 }
             }
         }
@@ -436,7 +465,7 @@ impl OrderBook {
             },
             Some(orders) => {
 
-                let mut available_quantities: u16 = 0;
+                let mut available_quantities = dec!(0);
 
                 for order in orders.iter(){
                     let quantity = order.quantity;
@@ -476,6 +505,10 @@ impl OrderBook {
             - after matching settle the user balances
         */
 
+        // Truncate price and quantity 
+        order.price = order.price.trunc_with_scale(9);
+        order.quantity = order.quantity.trunc_with_scale(6);
+
         let maker_side = order.get_opposing_side();
 
         if order.order_type == OrderType::Market {
@@ -497,7 +530,7 @@ impl OrderBook {
         order.quantity = remaining_quantity;
 
         // sit on the orderbook !!
-        if remaining_quantity > 0 {
+        if remaining_quantity > dec!(0) {
             self.add_order(order.clone());
         }   
 
@@ -565,7 +598,7 @@ impl OrderBook {
                         println!("Error while executing orders : {:?}", e);
 
                         let failed_order_placed = OrderPlacedResponse{
-                            executed_quantity:0,
+                            executed_quantity:dec!(0),
                             fills:vec![],
                             order_id:order_id.clone(),
                         };

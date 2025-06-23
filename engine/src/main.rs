@@ -1,6 +1,7 @@
 use std::{sync::{mpsc, Arc, Mutex}, thread};
 use common::message::{api::MessageFromApi, engine::OrderPlacedResponse};
 use r2d2_redis::{redis::{Commands, RedisError}};
+use rust_decimal::dec;
 
 use crate::{engine::Engine, orderbook::RedisResponse};
 
@@ -107,7 +108,7 @@ fn main() {
                                             let order_id = &order.id;
 
                                             let failed_order_placed = OrderPlacedResponse{
-                                                executed_quantity:0,
+                                                executed_quantity:dec!(0),
                                                 fills:vec![],
                                                 order_id:order.id.clone(),
                                             };
