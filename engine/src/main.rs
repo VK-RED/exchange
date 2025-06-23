@@ -1,14 +1,14 @@
 use std::{sync::{mpsc, Arc, Mutex}, thread};
-use common::message::{api::MessageFromApi, engine::OrderPlacedResponse};
-use r2d2_redis::{redis::{Commands, RedisError}};
+use common::message::{api::MessageFromApi, engine::{MessageFromEngine, OrderPlacedResponse}};
 use rust_decimal::dec;
 
-use crate::{engine::Engine, orderbook::RedisResponse};
+use crate::{engine::Engine, services::redis::RedisService};
 
 mod orderbook;
 mod engine;
 mod errors;
 mod order;
+mod services;
 
 // TOTAL THREADS = 1 MAIN + (1* NO.OF.ORDERBOOKS ) + 1 USER REQ thread 
 
@@ -33,6 +33,8 @@ fn main() {
         let pool_clone = engine.redis_pool.clone();
         let user_balances_clone = Arc::clone(&user_balances);
 
+        let redis_service = RedisService::new(pool_clone);
+
         println!("Spawning thread for the orderbook : {:?}", &orderbook.market);
 
         thread::spawn(move||{
@@ -46,7 +48,7 @@ fn main() {
                         orderbook.process(
                             message_type, 
                             user_balances_clone.clone(),
-                            &pool_clone
+                            &redis_service
                         );
                     },
                     Err(e) => {
@@ -67,16 +69,15 @@ fn main() {
     });
 
     let pool = engine.redis_pool.clone();
-    let mut conn = pool.get().unwrap();
-    let queue_key = &engine.order_queue_key;
+    let redis = RedisService::new(pool);
 
     loop {
 
-        let res: Result<Option<String>,RedisError> = conn.rpop(queue_key);
+        let res = redis.get_message_from_api();
 
         match res {
 
-            Ok(message_res) => {
+            Some(message_res) => {
 
                 if let Some(message) = message_res {
 
@@ -96,6 +97,7 @@ fn main() {
                                     let tx_res = markets_tx.get(market);
 
                                     match tx_res {
+
                                         Some(tx) => {
 
                                             let tx_send_err = format!("Error while sending order to the orderbook : {}",market);
@@ -105,7 +107,7 @@ fn main() {
                                         },
                                         None => {
 
-                                            let order_id = &order.id;
+                                            println!("No tx found for the market : {}", market);
 
                                             let failed_order_placed = OrderPlacedResponse{
                                                 executed_quantity:dec!(0),
@@ -113,23 +115,8 @@ fn main() {
                                                 order_id:order.id.clone(),
                                             };
 
-                                            let serialized = serde_json::to_string(&failed_order_placed);
-
-                                            let error_message = "Error while placing order".to_string();
-
-                                            let message;
-                                            if serialized.is_err(){
-                                                message = error_message;
-                                            }
-                                            else{
-                                                message = serialized.unwrap();
-                                            }
-                                            let redis_response:RedisResponse = conn.publish(order_id, message);
-
-                                            if let Err(e) = redis_response {
-                                                println!("Error while publishing to the order id : {}", e);
-                                            }
-                                            println!("No tx found for the market : {}", market);
+                                            redis.publish_message_to_api(MessageFromEngine::OrderPlaced(failed_order_placed));
+            
                                         }
                                     }
 
@@ -144,9 +131,7 @@ fn main() {
                 }
 
             },  
-            Err(e) => {
-                println!("Error while polling from the queue : {}", &e);
-            }
+            None => {},
         }
 
     }

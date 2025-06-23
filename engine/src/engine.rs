@@ -15,7 +15,6 @@ pub struct Engine {
     pub orderbooks: Vec<OrderBook>,
     pub user_balances: UserAssetBalance,
     pub redis_pool: Pool<RedisConnectionManager>,
-    pub order_queue_key: String,
 }
 
 
@@ -42,14 +41,10 @@ impl Engine {
         // Initially all the balances will be zero
         let balances: UserAssetBalance = HashMap::new();
 
-        // should be same as what we push in the queue in api
-        let order_queue_key = "orders".to_string();
-
         Self { 
             orderbooks, 
             user_balances: balances,
             redis_pool, 
-            order_queue_key,
         }
     }
 

@@ -1,10 +1,7 @@
 use std::{collections::HashMap, sync::{Arc, Mutex}};
-use common::{message::{api::MessageFromApi, engine::{OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType, Price}};
-use r2d2_redis::{r2d2::{Pool}, redis::Commands, RedisConnectionManager};
+use common::{message::{api::MessageFromApi, engine::{MessageFromEngine, OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType, Price}};
 use rust_decimal::{dec, Decimal, prelude::ToPrimitive};
-use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{BalanceError, EngineError, OrderBookError}, order::{Order}};
-
-pub type RedisResponse = Result<(), r2d2_redis::redis::RedisError>;
+use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{BalanceError, EngineError, OrderBookError}, order::Order, services::redis::RedisService};
 
 const QUOTE:&str = "USDC";
 const QUOTE_LAMPORTS:u64 = 1000_000;
@@ -560,10 +557,9 @@ impl OrderBook {
             &mut self, 
             message_type:MessageFromApi, 
             user_balances:Arc<Mutex<UserAssetBalance>>,
-            pool:&Pool<RedisConnectionManager>
+            redis:&RedisService,
     ){
-        let mut conn = pool.get().unwrap();
-
+    
         match message_type {
 
             MessageFromApi::CreateOrder(payload) => {
@@ -572,27 +568,10 @@ impl OrderBook {
                 let order_id = order.id.clone();
 
                 let res = self.process_order(order, user_balances);
-                let error_message = "Error while placing order".to_string();
 
-                match res {
+                let message = match res {
                     Ok(order_placed) => {
-                        
-                        let serialized = serde_json::to_string(&order_placed);
-                        
-                        let message;
-
-                        if serialized.is_err(){
-                            message = error_message;
-                        }
-                        else{
-                            message = serialized.unwrap();
-                        }
-
-                        let redis_response:RedisResponse = conn.publish(&order_id, message);
-
-                        if let Err(e) = redis_response {
-                            println!("Error while publishing to the order id : {}", e);
-                        }
+                        MessageFromEngine::OrderPlaced(order_placed)
                     },
                     Err(e) => {
                         println!("Error while executing orders : {:?}", e);
@@ -603,24 +582,11 @@ impl OrderBook {
                             order_id:order_id.clone(),
                         };
 
-                        let serialized = serde_json::to_string(&failed_order_placed);
-
-                        let message;
-                        if serialized.is_err(){
-                            message = error_message;
-                        }
-                        else{
-                            message = serialized.unwrap();
-                        }
-
-                        let redis_response:RedisResponse = conn.publish(&order_id, message);
-
-                        if let Err(e) = redis_response {
-                            println!("Error while publishing to the order id : {}", e);
-                        }
+                        MessageFromEngine::OrderPlaced(failed_order_placed)
                     }
-                }
+                };
 
+                redis.publish_message_to_api(message);
                 
             },
         }
