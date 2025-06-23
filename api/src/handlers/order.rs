@@ -10,9 +10,10 @@ use common::{
     types::order::{
         OrderSide, 
         OrderType, 
-        Price
+        Price, Quantity
     }};
 use r2d2_redis::redis::{Commands};
+use rust_decimal::dec;
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -25,7 +26,7 @@ pub struct CreateOrder{
     pub order_type: OrderType,
     pub market: String,
     pub price: Price,
-    pub quantity: u16
+    pub quantity: Quantity
 }
 
 pub type RedisCustomResult<T> =  Result<T, r2d2_redis::redis::RedisError>;
@@ -87,7 +88,7 @@ async fn create_order(payload:Json<CreateOrder>, state:Data<AppState>) -> impl R
 
     let mut result = OrderPlacedResponse {
         order_id:id,
-        executed_quantity:0,
+        executed_quantity:dec!(0),
         fills:vec![]
     };
 
