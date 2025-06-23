@@ -1,7 +1,8 @@
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-pub type Price = u64;
-pub type Quantity = u16;
+pub type Price = Decimal;
+pub type Quantity = Decimal;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Fill{
