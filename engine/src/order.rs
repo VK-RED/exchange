@@ -1,8 +1,5 @@
-use common::{message::api::CreateOrderPayload, types::order::{OrderSide, OrderType}};
+use common::{message::api::CreateOrderPayload, types::order::{OrderSide, OrderType, Price, Quantity}};
 use serde::{Deserialize, Serialize};
-
-pub type Price = u64;
-pub type Quantity = u16;
 
 #[derive(Deserialize, Debug, Serialize, Clone)]
 pub struct Order {
