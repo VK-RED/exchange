@@ -13,4 +13,5 @@ r2d2_redis = "0.14.0"
 redis = {version = "0.32.0", features = ["r2d2"]}
 uuid = {version = "1.17.0" , features = ["v4"]}
 rust_decimal = {version = "1.37" , features = ["macros"]}
+thiserror = "2.0.12"
 common = {path = "./common"}
