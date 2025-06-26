@@ -4,6 +4,7 @@ use dotenv::dotenv;
 pub mod handlers;
 pub mod errors;
 pub mod entrypoint;
+pub mod services;
 
 #[actix_web::main]
 async fn main() {
