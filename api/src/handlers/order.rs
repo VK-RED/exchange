@@ -4,16 +4,14 @@ use common::{
         api::{
             CreateOrderPayload, 
             MessageFromApi
-        }, 
-        engine::OrderPlacedResponse
+        }, engine::OrderPlacedResponse, 
     }, 
-    types::order::{
+    types::{error::ErrorResponse, order::{
         OrderSide, 
         OrderType, 
         Price, Quantity
-    }};
+    }}};
 use r2d2_redis::redis::{Commands};
-use rust_decimal::dec;
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -30,6 +28,7 @@ pub struct CreateOrder{
 }
 
 pub type RedisCustomResult<T> =  Result<T, r2d2_redis::redis::RedisError>;
+pub type OrderPlacedResult = Result<OrderPlacedResponse, ErrorResponse>;
 
 #[post("/order")]
 async fn create_order(payload:Json<CreateOrder>, state:Data<AppState>) -> impl Responder{
@@ -86,17 +85,16 @@ async fn create_order(payload:Json<CreateOrder>, state:Data<AppState>) -> impl R
         return CustomApiError::internal_error();
     }
 
-    let mut result = OrderPlacedResponse {
-        order_id:id,
-        executed_quantity:dec!(0),
-        fills:vec![]
-    };
+    let mut result: OrderPlacedResult = Err(ErrorResponse{
+        code:"INTERNAL_ERROR".to_string(),
+        message:"Internal Server Error".to_string()
+    });
 
     if let Ok(data) = message {
         let payload:RedisCustomResult<String> = data.get_payload();
 
         if let Ok(val) = payload {
-            let deserialized: Result<OrderPlacedResponse, serde_json::Error> = serde_json::from_str(&val);
+            let deserialized: Result<OrderPlacedResult, serde_json::Error> = serde_json::from_str(&val);
             
             if let Ok(deserial_data) = deserialized {
                 result = deserial_data;
@@ -104,6 +102,15 @@ async fn create_order(payload:Json<CreateOrder>, state:Data<AppState>) -> impl R
         }
     }
 
-    HttpResponse::Ok().json(result)
+    match result {
+        Ok(val) => {
+            HttpResponse::Ok().json(val)
+        },
+        Err(e) => {
+            HttpResponse::BadRequest().json(e)
+        }
+    }
+
+    
 
 }
