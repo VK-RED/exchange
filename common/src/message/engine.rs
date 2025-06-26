@@ -40,7 +40,7 @@ pub struct OrderFill{
     pub trade_id: u32,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct OrderCancelledResponse {
     pub order_id: String,
     pub quantity: Quantity,
