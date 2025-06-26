@@ -1,4 +1,4 @@
-use actix_web::{post, web::{Data, Json}, HttpResponse, Responder};
+use actix_web::{post, web::{Data, Json}, Responder};
 use common::{
     message::{
         api::{
@@ -6,16 +6,15 @@ use common::{
             MessageFromApi
         }, engine::OrderPlacedResponse, 
     }, 
-    types::{error::ErrorResponse, order::{
+    types::{order::{
         OrderSide, 
         OrderType, 
         Price, Quantity
     }}};
-use r2d2_redis::redis::{Commands};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::{entrypoint::AppState, errors::{CustomApiError}};
+use crate::{entrypoint::AppState, services::redis::{PubSubService, RedisService}, utils::engine_res_wrapper::get_engine_http_response};
 
 #[derive(Deserialize, Debug)]
 pub struct CreateOrder{
@@ -27,13 +26,18 @@ pub struct CreateOrder{
     pub quantity: Quantity
 }
 
-pub type RedisCustomResult<T> =  Result<T, r2d2_redis::redis::RedisError>;
-pub type OrderPlacedResult = Result<OrderPlacedResponse, ErrorResponse>;
-
 #[post("/order")]
 async fn create_order(payload:Json<CreateOrder>, state:Data<AppState>) -> impl Responder{
 
+    let guard = &state.redis_pool;
+    let conn_1 = guard.get().unwrap();
+    let mut conn_2 = guard.get().unwrap();
+
+    let mut redis_service = RedisService::new(conn_1);
+
     let id = Uuid::new_v4().to_string();
+    let pub_sub =  conn_2.as_pubsub();
+    let mut pub_sub_service = PubSubService::new(pub_sub, &id);
 
     let order = CreateOrderPayload {
         id:id.clone(),
@@ -45,71 +49,13 @@ async fn create_order(payload:Json<CreateOrder>, state:Data<AppState>) -> impl R
         order_type: payload.order_type,
     };
 
-    let message_type = MessageFromApi::CreateOrder(order);
+    let message_from_api = MessageFromApi::CreateOrder(order);
 
-    println!("order created : {:?}", message_type);
-
-    let serialized = serde_json::to_string(&message_type);
-
-    if serialized.is_err() {
-        return CustomApiError::internal_error();
-    }
-
-    let serialized = serialized.unwrap();
-
-    // We need two connections as we cant borrow them as mutable twice !
-    
-    let pub_sub = state.redis_pool.get();
-    let conn = state.redis_pool.get();
-
-    if conn.is_err() || pub_sub.is_err(){
-        return CustomApiError::internal_error();
-    }
-
-    let mut conn = conn.unwrap();
-    let mut pub_sub = pub_sub.unwrap();
-    let mut pub_sub = pub_sub.as_pubsub();
-
-    let res = pub_sub.subscribe(id.clone());
-
-    if res.is_err(){
-        return CustomApiError::internal_error();
-    }
-
-    let _: RedisCustomResult<()> = conn.lpush("orders", serialized);
-
-    let message = pub_sub.get_message();
-    let res = pub_sub.unsubscribe(id.clone());
-
-    if res.is_err(){
-        return CustomApiError::internal_error();
-    }
-
-    let mut result: OrderPlacedResult = Err(ErrorResponse{
-        code:"INTERNAL_ERROR".to_string(),
-        message:"Internal Server Error".to_string()
-    });
-
-    if let Ok(data) = message {
-        let payload:RedisCustomResult<String> = data.get_payload();
-
-        if let Ok(val) = payload {
-            let deserialized: Result<OrderPlacedResult, serde_json::Error> = serde_json::from_str(&val);
-            
-            if let Ok(deserial_data) = deserialized {
-                result = deserial_data;
-            }
-        }
-    }
-
-    match result {
-        Ok(val) => {
-            HttpResponse::Ok().json(val)
-        },
-        Err(e) => {
-            HttpResponse::BadRequest().json(e)
-        }
-    }
+    get_engine_http_response::<OrderPlacedResponse>(
+        message_from_api, 
+        &mut redis_service, 
+        &mut pub_sub_service
+    )
 
     
 
