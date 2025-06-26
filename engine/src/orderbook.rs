@@ -1,5 +1,5 @@
 use std::{collections::HashMap, sync::{Arc, Mutex}};
-use common::{message::{api::{CancelOrderPayload, MessageFromApi}, engine::{MessageFromEngine, OrderCancelledResponse, OrderFill, OrderPlacedResponse}}, types::order::{self, Fill, OrderSide, OrderType, Price}};
+use common::{message::{api::{CancelOrderPayload, MessageFromApi}, engine::{MessageFromEngine, OrderCancelledResponse, OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType, Price}};
 use rust_decimal::{dec, Decimal, prelude::ToPrimitive};
 use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{EngineError}, order::Order, services::redis::RedisService};
 
@@ -576,6 +576,7 @@ impl OrderBook {
                 match cancelled_order.side {
                     OrderSide::Buy => {
                         asset = QUOTE;
+                        println!("remaining : {remaining_qty} , cancelled_price:{cancelled_price}");
                         total_amount = (remaining_qty * cancelled_price * Decimal::from(QUOTE_LAMPORTS)).to_u64();
                     },
                     OrderSide::Sell => {
@@ -589,8 +590,11 @@ impl OrderBook {
                     Some(amount) => {
 
                         let err_msg = format!("{} balance not found for user : {}", asset, user_id);
-                        let asset_balance = user_w_asset_balance.get_mut(asset).expect(&err_msg);
 
+                        println!("asset : {}", asset);
+                        let asset_balance = user_w_asset_balance.get_mut(asset).expect(&err_msg);
+                        println!("asset_balance : {:?}", asset_balance);
+                        println!("amount : {}", amount);
                         asset_balance.locked_amount -= amount;
                         asset_balance.available_amount += amount;
 
@@ -624,6 +628,7 @@ impl OrderBook {
 
             let mut target_order_index = -1;
 
+            //iterate through orders of the price range
             for (index, order) in orders.iter().enumerate() {
                 if order.id == *target_order_id {
                     target_order_index = index as i32;
@@ -631,6 +636,7 @@ impl OrderBook {
                 }
             }
 
+            // if found cancel it!!
             if target_order_index != -1 {
 
                 let target_order_index = target_order_index as usize;
@@ -649,10 +655,11 @@ impl OrderBook {
                         let order_cancelled = OrderCancelledResponse {
                             order_id: order.id,
                             quantity: order.quantity,
-                            // TODO: FIX THIS
-                            executed_quantity: dec!(0),
+                            executed_quantity: order.filled,
                             side
                         };
+
+                        println!("cancelled order : {:?}", order_cancelled);
 
                         return Ok(Some((order_cancelled, *price)));
 
