@@ -1,4 +1,5 @@
 use common::{message::api::CreateOrderPayload, types::order::{OrderSide, OrderType, Price, Quantity}};
+use rust_decimal::dec;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Debug, Serialize, Clone)]
@@ -10,6 +11,7 @@ pub struct Order {
     pub order_type: OrderType,
     pub price: Price,
     pub quantity: Quantity,
+    pub filled:Quantity,
 }
 
 impl Order {
@@ -22,7 +24,8 @@ impl Order {
             market: payload.market,
             order_type: payload.order_type, 
             price: payload.price, 
-            quantity: payload.quantity, 
+            quantity: payload.quantity,
+            filled: dec!(0), 
         }
     }
 

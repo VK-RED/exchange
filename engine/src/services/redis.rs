@@ -1,5 +1,7 @@
-use common::message::engine::MessageFromEngine;
+use common::message::engine::{MessageFromEngine};
 use r2d2_redis::{r2d2::Pool, redis::{Commands, RedisError}, RedisConnectionManager};
+
+use crate::errors::EngineError;
 
 pub type RedisResponse = Result<(), r2d2_redis::redis::RedisError>;
 
@@ -17,21 +19,20 @@ impl RedisService {
         Self { pool }
     }
 
-    pub fn publish_message_to_api(&self, message:MessageFromEngine){
+    pub fn publish_message_to_api(
+        &self,
+        channel:String, 
+        message_res:Result<MessageFromEngine, EngineError>){
 
         let mut conn = self.pool.get().unwrap();
 
-        let (channel, serialized) = match message {
-
-            MessageFromEngine::OrderPlaced(data) => {
-                let serialized = serde_json::to_string(&data);
-                let err_msg = String::from("Error while placing order !");
-                let serialized = serialized.unwrap_or_else(|_|{
-                    println!("Error while serializing orders and publishing to API: {:?}", &data);
-                    err_msg
-                });
-                (data.order_id, serialized)
+        let serialized = match message_res {
+            Err(e) => {
+                e.to_error_response().serialize_as_err()
             },
+            Ok(message) => {
+                message.serialize_data_as_ok()
+            }
         };
 
         let res:RedisResponse = conn.publish(channel, serialized);        

@@ -1,8 +1,7 @@
 use std::{sync::{mpsc, Arc, Mutex}, thread};
-use common::message::{api::MessageFromApi, engine::{MessageFromEngine, OrderPlacedResponse}};
-use rust_decimal::dec;
+use common::message::{api::MessageFromApi};
 
-use crate::{engine::Engine, services::redis::RedisService};
+use crate::{engine::Engine, services::redis::RedisService,errors::EngineError};
 
 mod orderbook;
 mod engine;
@@ -90,37 +89,20 @@ fn main() {
 
                         Ok(message_type) => {
 
-                            match message_type {
+                            let market = message_type.get_market();
+                            let channel_to_publish = message_type.get_channel_to_publish();
 
-                                MessageFromApi::CreateOrder(order) => {
-                                    let market = &order.market;
-                                    let tx_res = markets_tx.get(market);
+                            let tx_res = markets_tx.get(market);
 
-                                    match tx_res {
-
-                                        Some(tx) => {
-
-                                            let tx_send_err = format!("Error while sending order to the orderbook : {}",market);
-                                            
-                                            tx.send(MessageFromApi::CreateOrder(order))
-                                            .expect(&tx_send_err);
-                                        },
-                                        None => {
-
-                                            println!("No tx found for the market : {}", market);
-
-                                            let failed_order_placed = OrderPlacedResponse{
-                                                executed_quantity:dec!(0),
-                                                fills:vec![],
-                                                order_id:order.id.clone(),
-                                            };
-
-                                            redis.publish_message_to_api(MessageFromEngine::OrderPlaced(failed_order_placed));
-            
-                                        }
-                                    }
-
+                            match tx_res {
+                                None => {
+                                    println!("No tx found for the market : {}", market);
+                                    redis.publish_message_to_api(channel_to_publish, Err(EngineError::InternalError));
                                 },
+                                Some(tx) => {
+                                    let tx_send_err = format!("Error while sending order to the orderbook : {}",market);
+                                    tx.send(message_type).expect(&tx_send_err);
+                                }
                             }
 
                         },
