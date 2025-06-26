@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::{Arc, Mutex}};
-use common::{message::{api::MessageFromApi, engine::{MessageFromEngine, OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType, Price}};
+use common::{message::{api::{CancelOrderPayload, MessageFromApi}, engine::{MessageFromEngine, OrderCancelledResponse, OrderFill, OrderPlacedResponse}}, types::order::{self, Fill, OrderSide, OrderType, Price}};
 use rust_decimal::{dec, Decimal, prelude::ToPrimitive};
-use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{BalanceError, EngineError, OrderBookError}, order::Order, services::redis::RedisService};
+use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{EngineError}, order::Order, services::redis::RedisService};
 
 const QUOTE:&str = "USDC";
 const QUOTE_LAMPORTS:u64 = 1000_000;
@@ -137,7 +137,7 @@ impl OrderBook {
                     // DROPPING IS NECESSARY, ELSE THIS WONT UNLOCK THE MUTEX
                     drop(guard);
                     println!("user : {} doesnt have enough balance for asset : {:?} ", &order.user_id, &asset);
-                    return Err(EngineError::BalanceError(BalanceError::InsufficientBalance));
+                    return Err(EngineError::InsufficientBalance);
                 }
 
             },
@@ -145,7 +145,7 @@ impl OrderBook {
                 // DROPPING IS NECESSARY, ELSE THIS WONT UNLOCK THE MUTEX
                 drop(guard);
                 println!("user : {} not found", order.user_id);
-                return Err(EngineError::OrderBookError(OrderBookError::UserNotFound));
+                return Err(EngineError::UserNotFound);
             },
         };
 
@@ -217,8 +217,8 @@ impl OrderBook {
 
     pub fn match_opposing_orders(
         &mut self,
-        order:&Order
-    ) -> (Price, Vec<Fill>, Vec<CompleteFill>){
+        order:&mut Order
+    ) -> (Vec<Fill>, Vec<CompleteFill>){
 
         let mut remaining_quantity = order.quantity;
         
@@ -253,10 +253,12 @@ impl OrderBook {
                     break;
                 }
 
-                let filled_quantity = opposing_order.quantity.min(remaining_quantity);
-                remaining_quantity -= filled_quantity;
-                opposing_order.quantity -= filled_quantity;
+                let filled_quantity = (opposing_order.quantity - opposing_order.filled).min(remaining_quantity);
                 
+                remaining_quantity -= filled_quantity;
+                opposing_order.filled += filled_quantity;
+                order.filled += filled_quantity;
+
                 trade_id+=1;
                 last_price = *opposing_price;
 
@@ -272,7 +274,7 @@ impl OrderBook {
 
                 fill_orders.push(fill);
 
-                if opposing_order.quantity == dec!(0) {
+                if opposing_order.quantity == opposing_order.filled {
 
                     let complete_fill = CompleteFill {
                         order_id: opposing_order.id.clone(),
@@ -285,7 +287,7 @@ impl OrderBook {
             }
         }
 
-        // FINALLY SET THE TRADEID BACK TO ORDERBOOK'S TRADEID
+        // FINALLY SET THE TRADEID AND LAST PRICE BACK TO ORDERBOOK'S TRADEID
         self.trade_id = trade_id;
         self.last_price = last_price;
     
@@ -297,7 +299,7 @@ impl OrderBook {
             println!("filled 0 quantities of {} for order : {}", order.quantity, &order.id)
         }        
 
-        (remaining_quantity, fill_orders, complete_fill_orders)
+        (fill_orders, complete_fill_orders)
 
     }
 
@@ -457,7 +459,7 @@ impl OrderBook {
                     order.price,
                 );
 
-                Err(EngineError::OrderBookError(OrderBookError::ExecuteMarketOrder))
+                Err(EngineError::PartialOrderFill)
                 
             },
             Some(orders) => {
@@ -481,7 +483,7 @@ impl OrderBook {
                         order.price,
                     );
 
-                    Err(EngineError::OrderBookError(OrderBookError::ExecuteMarketOrder))
+                    Err(EngineError::PartialOrderFill)
                 }
 
             }
@@ -515,19 +517,14 @@ impl OrderBook {
         self.validate_and_lock_user_balance(&order, &user_balances)?;
 
         let (
-            remaining_quantity,
             filled_orders,
             complete_fill_orders
-        ) = self.match_opposing_orders(&order);
+        ) = self.match_opposing_orders(&mut order);
         
         self.remove_complete_filled_orders(complete_fill_orders, maker_side);
 
-        let filled_quantity = order.quantity - remaining_quantity;
-        // update the order quantity after matching
-        order.quantity = remaining_quantity;
-
         // sit on the orderbook !!
-        if remaining_quantity > dec!(0) {
+        if order.filled < order.quantity {
             self.add_order(order.clone());
         }   
 
@@ -545,7 +542,7 @@ impl OrderBook {
         }).collect();
 
         let order_placed = OrderPlacedResponse {
-            executed_quantity: filled_quantity,
+            executed_quantity: order.filled,
             order_id: order.id,
             fills: filled_orders,
         };
@@ -553,43 +550,212 @@ impl OrderBook {
         Ok(order_placed)
     }
 
+    pub fn settle_balance_after_cancel(
+        &self, 
+        user_id: &String,
+        cancelled_order: &OrderCancelledResponse,
+        cancelled_price: Decimal,
+        user_balances:Arc<Mutex<UserAssetBalance>>,
+    ) -> Result<(), EngineError>{
+
+        let mut guard = user_balances.lock().unwrap();
+        
+        match guard.get_mut(user_id) {
+            None => {
+                println!("Error while getting guard lock in settling balance after cancel");
+                drop(guard);
+                Err(EngineError::UserNotFound)
+            },
+            Some(user_w_asset_balance) => {
+
+                let remaining_qty = cancelled_order.quantity - cancelled_order.executed_quantity;
+
+                let total_amount;
+                let asset;
+
+                match cancelled_order.side {
+                    OrderSide::Buy => {
+                        asset = QUOTE;
+                        total_amount = (remaining_qty * cancelled_price * Decimal::from(QUOTE_LAMPORTS)).to_u64();
+                    },
+                    OrderSide::Sell => {
+                        asset = &self.base_asset;
+                        let base_lamports = self.get_base_lamports();
+                        total_amount = (remaining_qty * Decimal::from(base_lamports)).to_u64();
+                    }
+                }
+
+                match total_amount {
+                    Some(amount) => {
+
+                        let err_msg = format!("{} balance not found for user : {}", asset, user_id);
+                        let asset_balance = user_w_asset_balance.get_mut(asset).expect(&err_msg);
+
+                        asset_balance.locked_amount -= amount;
+                        asset_balance.available_amount += amount;
+
+                        Ok(())
+                    },
+                    None => {
+                        println!("Error while settling :{} balance after cancelling, total amount: {:?}", asset, total_amount);
+                        drop(guard);
+                        Err(EngineError::InternalError)
+                    }
+                }
+            }
+        }
+
+    }
+
+    /// returns cancelled_order with price
+    pub fn cancel_order_in_side(
+        &mut self, 
+        side:OrderSide,
+        target_order_id: &String,
+        user_id:&String,
+    ) -> Result<Option<(OrderCancelledResponse, Decimal)>, EngineError>{    
+
+        let side_with_orders = match side{
+            OrderSide::Buy => &mut self.bids,
+            OrderSide::Sell => &mut self.asks,
+        };
+
+        for (price, orders) in side_with_orders{
+
+            let mut target_order_index = -1;
+
+            for (index, order) in orders.iter().enumerate() {
+                if order.id == *target_order_id {
+                    target_order_index = index as i32;
+                    break;
+                }
+            }
+
+            if target_order_index != -1 {
+
+                let target_order_index = target_order_index as usize;
+
+                match orders.get(target_order_index) {
+
+                    Some(target_order) => {
+
+                        if target_order.user_id != *user_id {
+                            println!("{} cannot cancel the order : {:?}", user_id, target_order);
+                            return Err(EngineError::MismatchUser);                            
+                        }
+
+                        let order = orders.remove(target_order_index);
+
+                        let order_cancelled = OrderCancelledResponse {
+                            order_id: order.id,
+                            quantity: order.quantity,
+                            // TODO: FIX THIS
+                            executed_quantity: dec!(0),
+                            side
+                        };
+
+                        return Ok(Some((order_cancelled, *price)));
+
+                    },
+                    None =>{
+                        println!("Cannnot find target order to cancel in orders at index : {}", target_order_index);
+                        return Err(EngineError::InternalError);
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+
+    }   
+
+    pub fn cancel_order(
+        &mut self,
+        order_payload:CancelOrderPayload,
+        user_balances:Arc<Mutex<UserAssetBalance>>,
+    ) -> Result<OrderCancelledResponse, EngineError>{
+        let mut order_cancelled_res;
+
+        order_cancelled_res = self.cancel_order_in_side(
+            OrderSide::Buy, 
+            &order_payload.order_id,
+            &order_payload.user_id,
+        )?;
+
+        if order_cancelled_res.is_none() {
+            order_cancelled_res = self.cancel_order_in_side(
+                OrderSide::Sell, 
+                &order_payload.order_id,
+                &order_payload.user_id,
+            )?;
+        }
+
+        match order_cancelled_res {
+            Some((res, price)) => {
+                self.settle_balance_after_cancel(
+                    &order_payload.user_id,
+                    &res,
+                    price,
+                    user_balances
+                )?;
+                Ok(res)
+            },
+            None => {
+                Err(EngineError::InvalidOrderId)
+            }
+        }
+    
+    }
+   
     pub fn process(
             &mut self, 
             message_type:MessageFromApi, 
             user_balances:Arc<Mutex<UserAssetBalance>>,
             redis:&RedisService,
     ){
+        let publish_on_channel;
     
-        match message_type {
+        let message = match message_type {
 
             MessageFromApi::CreateOrder(payload) => {
 
                 let order = Order::from_create_order_payload(payload);
-                let order_id = order.id.clone();
+                publish_on_channel = order.id.clone();
 
                 let res = self.process_order(order, user_balances);
 
                 let message = match res {
                     Ok(order_placed) => {
-                        MessageFromEngine::OrderPlaced(order_placed)
+                        Ok(MessageFromEngine::OrderPlaced(order_placed))
                     },
                     Err(e) => {
-                        println!("Error while executing orders : {:?}", e);
-
-                        let failed_order_placed = OrderPlacedResponse{
-                            executed_quantity:dec!(0),
-                            fills:vec![],
-                            order_id:order_id.clone(),
-                        };
-
-                        MessageFromEngine::OrderPlaced(failed_order_placed)
+                        Err(e)
                     }
                 };
 
-                redis.publish_message_to_api(message);
+                message
                 
             },
-        }
+
+            MessageFromApi::CancelOrder(order_payload) => {
+                publish_on_channel = order_payload.order_id.clone();
+                let cancel_order_res = self.cancel_order(order_payload, user_balances);
+
+                let message = match cancel_order_res {
+                    Ok(order_cancel) => {
+                        Ok(MessageFromEngine::OrderCancelled(order_cancel))
+                    },
+                    Err(e) => {
+                        Err(e)
+                    }
+                };
+
+                message
+            }
+        };
+
+        redis.publish_message_to_api(publish_on_channel, message);
+
 
     }
 
