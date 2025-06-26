@@ -5,7 +5,8 @@ use crate::types::{order::{OrderSide, OrderType, Price, Quantity}};
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub enum MessageFromApi{
     CreateOrder(CreateOrderPayload),
-    CancelOrder(CancelOrderPayload)
+    CancelOrder(CancelOrderPayload),
+    CancelAllOrders(CancelOrdersPayload),
 }
 
 impl MessageFromApi {
@@ -13,6 +14,7 @@ impl MessageFromApi {
         match self{
             MessageFromApi::CreateOrder(order) => &order.market,
             MessageFromApi::CancelOrder(order) => &order.market,
+            MessageFromApi::CancelAllOrders(order) => &order.market,
         }
     }
 
@@ -20,6 +22,7 @@ impl MessageFromApi {
         match self{
             MessageFromApi::CreateOrder(order) => order.id.clone(),
             MessageFromApi::CancelOrder(order) => order.order_id.clone(),
+            MessageFromApi::CancelAllOrders(order) => order.user_id.clone(), // send message on the users channel
         }
     }
 }
@@ -39,5 +42,11 @@ pub struct CreateOrderPayload {
 pub struct CancelOrderPayload {
     pub market: String,
     pub order_id: String,
+    pub user_id: String,
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub struct CancelOrdersPayload {
+    pub market: String,
     pub user_id: String,
 }
