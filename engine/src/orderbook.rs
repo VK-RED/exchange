@@ -1,5 +1,5 @@
-use std::{collections::HashMap, sync::{Arc, Mutex}};
-use common::{message::{api::{CancelOrderPayload, MessageFromApi}, engine::{MessageFromEngine, OrderCancelledResponse, OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType, Price}};
+use std::{collections::{HashMap, HashSet}, sync::{Arc, Mutex}};
+use common::{message::{api::{CancelOrderPayload, MessageFromApi}, engine::{CancelAllOrders, MessageFromEngine, OrderCancelledResponse, OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType, Price}};
 use rust_decimal::{dec, Decimal, prelude::ToPrimitive};
 use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{EngineError}, order::Order, services::redis::RedisService};
 
@@ -242,8 +242,17 @@ impl OrderBook {
 
         for (opposing_price, opposing_orders) in opposing_side_with_orders {
 
-            if opposing_price > &order.price {
-                println!("maker price : {} gets higher than the order price : {}", opposing_price, order.price);
+            let can_match_orders = match order.side {
+                OrderSide::Buy => {
+                    opposing_price <= &order.price
+                },
+                OrderSide::Sell => {
+                    opposing_price >= &order.price
+                }
+            };
+
+            if !can_match_orders {
+                println!("cant match maker price : {} against order price : {}", opposing_price, order.price);
                 break;
             }
 
@@ -713,6 +722,139 @@ impl OrderBook {
         }
     
     }
+
+
+    fn cancel_all_orders_on_side(
+        &mut self,
+        user_id: &str,
+        side: OrderSide,
+        cancelled_orders: &mut Vec<CancelAllOrders>
+    ){
+        let orders_with_side = match side{
+            OrderSide::Buy =>{
+                &mut self.bids
+            },
+            OrderSide::Sell=> {
+                &mut self.asks
+            }
+        };
+
+        let mut price_with_empty_orders = vec![];
+
+        // iterate through all the price range and find the orders to remove
+        // using iter as to aboid value getting consumed
+        for (price, orders) in orders_with_side.iter_mut() {
+
+            let mut orders_to_remove = HashSet::new();
+
+            // using iter as to avoid orders getting consumed
+            for order in orders.iter() {
+                if order.user_id == user_id {
+                    orders_to_remove.insert(order.id.clone());
+                }
+            }
+
+            orders.retain(|order| {
+
+                if orders_to_remove.contains(&order.id) {
+
+                    println!("order cancelled: {:?}", order);
+
+                    cancelled_orders.push(
+                        CancelAllOrders { 
+                            order_id: order.id.clone(), 
+                            quantity: order.quantity, 
+                            executed_quantity:order.filled, 
+                            side:order.side, 
+                            price: order.price,
+                        }
+                    );
+
+                    return false;
+                }
+                return true;
+            });
+
+            // if there are no orders, then remove the price
+            
+            if orders.len() == 0 {
+                println!("no orders left in price : {} on : {:?}", price, side);
+                price_with_empty_orders.push(price.clone());
+            }
+
+        }
+
+        for price in price_with_empty_orders {
+            orders_with_side.remove(&price);
+        }
+        
+
+    }
+
+    pub fn cancel_all_orders(
+        &mut self,
+        user_id: &str,
+        user_balances:Arc<Mutex<UserAssetBalance>>,
+    )-> Result<Vec<CancelAllOrders>, EngineError>{
+
+        let mut cancelled_orders: Vec<CancelAllOrders> = vec![];
+        
+        self.cancel_all_orders_on_side(
+            user_id, 
+            OrderSide::Buy, 
+            &mut cancelled_orders
+        );
+
+        self.cancel_all_orders_on_side(
+            user_id, 
+            OrderSide::Sell, 
+            &mut cancelled_orders
+        );
+
+        let mut guard = user_balances.lock().unwrap();
+
+        let user_asset_balance = guard.get_mut(user_id).ok_or_else(||{
+            EngineError::UserNotFound
+        })?;
+
+        for order in  cancelled_orders.iter() {
+
+            let asset;
+            let amount;
+
+            match order.side {
+                OrderSide::Buy => {
+                    asset = QUOTE;
+                    let remaining = order.quantity - order.executed_quantity;
+                    amount = order.price * remaining * Decimal::from(QUOTE_LAMPORTS);
+                },
+                OrderSide::Sell => {
+                    asset = &self.base_asset;
+                    let remaining = order.quantity - order.executed_quantity;
+                    amount = remaining * Decimal::from(self.get_base_lamports());
+                }
+            }
+
+            let total_amount = amount.to_u64().ok_or_else(||{
+                println!("none while converting amount: {}", amount);
+                EngineError::InternalError
+            })?;
+
+            println!("settling {} {} to {}", total_amount, asset, user_id);
+
+            let asset_balance = user_asset_balance.get_mut(asset).ok_or_else(||{
+                println!("assetbalance {:?} not set for user : {}", asset, user_id);
+                EngineError::InternalError
+            })?;
+
+            asset_balance.locked_amount -= total_amount;
+            asset_balance.available_amount += total_amount;
+        }
+
+
+        Ok(cancelled_orders)
+
+    }
    
     pub fn process(
             &mut self, 
@@ -758,7 +900,21 @@ impl OrderBook {
                 };
 
                 message
+            },
+
+            MessageFromApi::CancelAllOrders(payload) => {
+
+                publish_on_channel = payload.user_id.clone();
+                
+                let cancel_all_orders_res = self.cancel_all_orders(&payload.user_id, user_balances);
+
+                let message = cancel_all_orders_res.
+                map(|orders| MessageFromEngine::AllOrdersCancelled(orders));
+
+                message
             }
+
+            
         };
 
         redis.publish_message_to_api(publish_on_channel, message);
