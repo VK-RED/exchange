@@ -24,6 +24,7 @@ macro_rules! init_app {
                 actix_web::web::scope("/api")
                 .service(crate::handlers::health::hello_world)
                 .service(crate::handlers::order::create::create_order)
+                .service(crate::handlers::order::cancel::cancel_order)
             )
     };
 }
