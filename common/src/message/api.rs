@@ -7,7 +7,8 @@ pub enum MessageFromApi{
     CreateOrder(CreateOrderPayload),
     CancelOrder(CancelOrderPayload),
     CancelAllOrders(CancelOrdersPayload),
-    GetAllOpenOrders(OpenOrdersPayload)
+    GetAllOpenOrders(OpenOrdersPayload),
+    GetDepth(String),
 }
 
 impl MessageFromApi {
@@ -17,6 +18,7 @@ impl MessageFromApi {
             MessageFromApi::CancelOrder(order) => &order.market,
             MessageFromApi::CancelAllOrders(order) => &order.market,
             MessageFromApi::GetAllOpenOrders(order) => &order.market,
+            MessageFromApi::GetDepth(order) => order
         }
     }
 
@@ -26,6 +28,7 @@ impl MessageFromApi {
             MessageFromApi::CancelOrder(order) => order.order_id.clone(),
             MessageFromApi::CancelAllOrders(order) => order.user_id.clone(), // send message on the users channel
             MessageFromApi::GetAllOpenOrders(order) => order.user_id.clone(), // send message on the users channel
+            MessageFromApi::GetDepth(order) => order.clone()
         }
     }
 }

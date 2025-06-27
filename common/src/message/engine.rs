@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::types::{order::{OrderSide, Price, Quantity}};
@@ -8,6 +9,7 @@ pub enum MessageFromEngine{
     OrderCancelled(OrderCancelledResponse),
     AllOrdersCancelled(OrdersCancelledResponse),
     AllOpenOrders(AllOpenOrdersResponse),
+    GetDepth(DepthResponse)
 }
 
 type EngineResult<T> = Result<T, ()>;
@@ -31,7 +33,11 @@ impl MessageFromEngine{
             MessageFromEngine::AllOpenOrders(data) => {
                 let ok_data: EngineResult<&AllOpenOrdersResponse> = Ok(data);
                 serde_json::to_string(&ok_data).unwrap_or_else(|_|err_msg)
-            }
+            },
+            MessageFromEngine::GetDepth(data) => {
+                let ok_data: EngineResult<&DepthResponse> = Ok(data);
+                serde_json::to_string(&ok_data).unwrap_or_else(|_|err_msg)
+            },
         }   
     }
 }
@@ -79,3 +85,11 @@ pub struct OpenOrder{
 }
 
 pub type AllOpenOrdersResponse = Vec<OpenOrder>;
+
+#[derive(Serialize, Deserialize, Debug)]
+/// first element is price and
+/// second element is quantity 
+pub struct DepthResponse{
+    pub bids: Vec<[Decimal;2]>,
+    pub asks: Vec<[Decimal;2]>
+}
