@@ -1,5 +1,5 @@
 use std::{collections::{HashMap, HashSet}, sync::{Arc, Mutex}};
-use common::{message::{api::{CancelOrderPayload, MessageFromApi}, engine::{CancelAllOrders, DepthResponse, MessageFromEngine, OpenOrder, OrderCancelledResponse, OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType, Price}};
+use common::{message::{api::{CancelOrderPayload, MessageFromApi}, db_filler::{AddOrderToDb, OrderStatus, Trade, UpdateOrder}, engine::{CancelAllOrders, DepthResponse, MessageFromEngine, OpenOrder, OrderCancelledResponse, OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType, Price}};
 use rust_decimal::{dec, Decimal, prelude::ToPrimitive};
 use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{EngineError}, order::{Order, OrdersWithQuantity}, services::redis::RedisService};
 
@@ -285,7 +285,8 @@ impl OrderBook {
                     order_id: opposing_order.id.clone(),
                     trade_id,
                     price: *opposing_price,
-                    quantity: filled_quantity,
+                    quantity: opposing_order.quantity,
+                    filled_quantity: filled_quantity,
                 };   
 
                 println!("matched fill : {:?} for order id: {}", fill, order.id);
@@ -373,7 +374,7 @@ impl OrderBook {
 
             let maker_asset_balance = guard.get_mut(&filled_order.maker_id).unwrap();
             
-            let quantity = filled_order.quantity;
+            let quantity = filled_order.filled_quantity;
             let price = filled_order.price;
 
             let base_lamports = self.get_base_lamports();
@@ -509,7 +510,7 @@ impl OrderBook {
 
     pub fn process_order(
         &mut self, 
-        mut order:Order,
+        order:&mut Order,
         user_balances:Arc<Mutex<UserAssetBalance>>,
     ) -> Result<OrderPlacedResponse, EngineError>{
 
@@ -528,15 +529,15 @@ impl OrderBook {
         let maker_side = order.get_opposing_side();
 
         if order.order_type == OrderType::Market {
-            self.can_place_market_order(&order)?;
+            self.can_place_market_order(order)?;
         }
 
-        self.validate_and_lock_user_balance(&order, &user_balances)?;
+        self.validate_and_lock_user_balance(order, &user_balances)?;
 
         let (
             filled_orders,
             complete_fill_orders
-        ) = self.match_opposing_orders(&mut order);
+        ) = self.match_opposing_orders(order);
         
         self.remove_complete_filled_orders(complete_fill_orders, maker_side);
 
@@ -546,21 +547,23 @@ impl OrderBook {
         }   
 
         self.settle_user_balance(
-            order.user_id, 
+            order.user_id.clone(), 
             order.side, 
             &filled_orders, 
             user_balances
         );
 
         let filled_orders:Vec<OrderFill> = filled_orders.iter().map(|o| OrderFill{
+            order_id: o.order_id.clone(),
             price: o.price,
             quantity: o.quantity,
+            filled_quantity: o.filled_quantity,
             trade_id: o.trade_id,
         }).collect();
 
         let order_placed = OrderPlacedResponse {
             executed_quantity: order.filled,
-            order_id: order.id,
+            order_id: order.id.clone(),
             fills: filled_orders,
         };
 
@@ -981,17 +984,69 @@ impl OrderBook {
     ){
         let publish_on_channel;
     
-        let message = match message_type {
+        match message_type {
 
             MessageFromApi::CreateOrder(payload) => {
 
-                let order = Order::from_create_order_payload(payload);
+                let mut order = Order::from_create_order_payload(payload);
+
                 publish_on_channel = order.id.clone();
 
-                let res = self.process_order(order, user_balances);
+                let res = self.process_order(&mut order, user_balances);
+
+                let mut order_to_add = None;
+                let mut orders_to_update:Vec<UpdateOrder> = vec![];
+
+                let mut trades = vec![];
 
                 let message = match res {
+
                     Ok(order_placed) => {
+
+                        let order_status = if order.quantity == order_placed.executed_quantity {OrderStatus::Filled} else {OrderStatus::Open};
+
+                        let add_order = AddOrderToDb {
+                            filled_quantity: order_placed.executed_quantity,
+                            order_id: order.id.clone(),
+                            price: order.price,
+                            quantity: order.quantity,
+                            side: order.side,
+                            status: order_status,
+                        };
+
+                        order_to_add = Some(add_order);
+
+                        orders_to_update = order_placed.fills.iter().map(|order|{
+
+                            let order_status;
+
+                            match order.filled_quantity == order.quantity {
+                                true => order_status = OrderStatus::Filled,
+                                false => order_status = OrderStatus::Open,
+                            }
+
+                            UpdateOrder {
+                                filled_quantity: order.filled_quantity,
+                                order_id: order.order_id.clone(),
+                                status:order_status,
+                            }
+                        }).collect();
+
+                        for fill in order_placed.fills.iter(){
+
+                            let trade = Trade {
+                                id: fill.trade_id,
+                                price: fill.price,
+                                quantity: fill.filled_quantity,
+                                quote_qty: order.price * fill.filled_quantity,
+                                market: self.market.clone(),
+                                // TOD0: FIX THIS
+                                timestamp: 0,
+                            };
+
+                            trades.push(trade);
+                        }
+
                         Ok(MessageFromEngine::OrderPlaced(order_placed))
                     },
                     Err(e) => {
@@ -999,7 +1054,10 @@ impl OrderBook {
                     }
                 };
 
-                message
+                redis.publish_message_to_api(publish_on_channel, message);
+                // publish to update_db
+                redis.publish_trades_to_db(trades);
+                redis.update_db_orders(order_to_add, orders_to_update);
                 
             },
 
@@ -1016,7 +1074,10 @@ impl OrderBook {
                     }
                 };
 
-                message
+                let order_id = publish_on_channel.clone();
+
+                redis.publish_message_to_api(publish_on_channel, message);
+                redis.publish_cancel_order_updates(vec![order_id]);
             },
 
             MessageFromApi::CancelAllOrders(payload) => {
@@ -1025,10 +1086,20 @@ impl OrderBook {
                 
                 let cancel_all_orders_res = self.cancel_all_orders(&payload.user_id, user_balances);
 
-                let message = cancel_all_orders_res.
-                map(|orders| MessageFromEngine::AllOrdersCancelled(orders));
+                let mut cancelled_orders = vec![];
 
-                message
+                let message = cancel_all_orders_res.
+                map(|orders|{
+
+                    for order in orders.iter() {
+                        cancelled_orders.push(order.order_id.clone());
+                    }
+
+                    MessageFromEngine::AllOrdersCancelled(orders)
+                } );
+
+                redis.publish_message_to_api(publish_on_channel, message);
+                redis.publish_cancel_order_updates(cancelled_orders);
             },
 
             MessageFromApi::GetAllOpenOrders(payload) => {
@@ -1040,7 +1111,7 @@ impl OrderBook {
                 let message = get_all_orders_res.
                 map(|orders| MessageFromEngine::AllOpenOrders(orders));
 
-                message
+                redis.publish_message_to_api(publish_on_channel, message);
             },
 
             MessageFromApi::GetDepth(market) => {
@@ -1050,11 +1121,9 @@ impl OrderBook {
 
                 let message = depth_res.map(|depth| MessageFromEngine::GetDepth(depth));
                 
-                message
+                redis.publish_message_to_api(publish_on_channel, message);
             }
         };
-
-        redis.publish_message_to_api(publish_on_channel, message);
 
 
     }
