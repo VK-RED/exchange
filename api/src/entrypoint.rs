@@ -26,6 +26,7 @@ macro_rules! init_app {
                 .service(crate::handlers::order::create::create_order)
                 .service(crate::handlers::order::cancel::cancel_order)
                 .service(crate::handlers::order::cancel_all::cancel_all_orders)
+                .service(crate::handlers::order::open_orders::get_all_open_orders)
             )
     };
 }
