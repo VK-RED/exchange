@@ -1,5 +1,5 @@
 use std::{collections::{HashMap, HashSet}, sync::{Arc, Mutex}};
-use common::{message::{api::{CancelOrderPayload, MessageFromApi}, engine::{CancelAllOrders, MessageFromEngine, OpenOrder, OrderCancelledResponse, OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType, Price}};
+use common::{message::{api::{CancelOrderPayload, MessageFromApi}, engine::{CancelAllOrders, DepthResponse, MessageFromEngine, OpenOrder, OrderCancelledResponse, OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType, Price}};
 use rust_decimal::{dec, Decimal, prelude::ToPrimitive};
 use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{EngineError}, order::{Order, OrdersWithQuantity}, services::redis::RedisService};
 
@@ -940,6 +940,38 @@ impl OrderBook {
         
         Ok(open_orders)
     }
+
+    pub fn get_depth_on_side(
+        &self,
+        side:OrderSide,
+    ) -> Vec<[Decimal; 2]>{
+        let mut price_n_qty = vec![];
+        
+        let price_w_orders_n_qty = match side {
+            OrderSide::Buy => &self.bids,
+            OrderSide::Sell => &self.asks,
+        };
+
+        for (price, orders_w_qty) in price_w_orders_n_qty {
+            let arr = [*price, orders_w_qty.total_quantity];
+            price_n_qty.push(arr);
+        }
+
+        price_n_qty
+
+    }
+
+    pub fn get_depth(&self) -> Result<DepthResponse,EngineError>{
+        let bid_depth = self.get_depth_on_side(OrderSide::Buy);
+        let ask_depth = self.get_depth_on_side(OrderSide::Sell);
+
+        let depth = DepthResponse {
+            asks: ask_depth,
+            bids: bid_depth
+        };
+
+        Ok(depth)
+    }
    
     pub fn process(
             &mut self, 
@@ -1011,7 +1043,15 @@ impl OrderBook {
                 message
             },
 
-            
+            MessageFromApi::GetDepth(market) => {
+                publish_on_channel = market.clone();
+
+                let depth_res = self.get_depth();
+
+                let message = depth_res.map(|depth| MessageFromEngine::GetDepth(depth));
+                
+                message
+            }
         };
 
         redis.publish_message_to_api(publish_on_channel, message);
