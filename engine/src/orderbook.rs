@@ -1,5 +1,5 @@
 use std::{collections::{HashMap, HashSet}, sync::{Arc, Mutex}};
-use common::{message::{api::{CancelOrderPayload, MessageFromApi}, engine::{CancelAllOrders, MessageFromEngine, OrderCancelledResponse, OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType, Price}};
+use common::{message::{api::{CancelOrderPayload, MessageFromApi}, engine::{CancelAllOrders, MessageFromEngine, OpenOrder, OrderCancelledResponse, OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType, Price}};
 use rust_decimal::{dec, Decimal, prelude::ToPrimitive};
 use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{EngineError}, order::Order, services::redis::RedisService};
 
@@ -855,6 +855,56 @@ impl OrderBook {
         Ok(cancelled_orders)
 
     }
+
+    fn get_open_orders_on_side(
+        &self,
+        user_id: &str,
+        side: OrderSide,
+        open_orders: &mut Vec<OpenOrder>
+    ){
+        let orders_with_side = match side {
+            OrderSide::Buy => &self.bids,
+            OrderSide::Sell => &self.asks,
+        };
+
+        for (_price, orders) in orders_with_side {
+            for order in orders {
+                if order.user_id == user_id {
+                    let open_order = OpenOrder {
+                        executed_quantity: order.filled,
+                        order_id: order.id.clone(),
+                        price: order.price,
+                        quantity: order.quantity,
+                        side: order.side,
+                    };
+                    open_orders.push(open_order);
+                }
+            }
+        }
+        
+    }
+
+    pub fn get_all_open_orders(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<OpenOrder>, EngineError> {
+
+        let mut open_orders = vec![];
+
+        self.get_open_orders_on_side(
+            user_id, 
+            OrderSide::Buy, 
+            &mut open_orders
+        );
+
+        self.get_open_orders_on_side(
+            user_id, 
+            OrderSide::Sell, 
+            &mut open_orders
+        );
+        
+        Ok(open_orders)
+    }
    
     pub fn process(
             &mut self, 
@@ -912,7 +962,19 @@ impl OrderBook {
                 map(|orders| MessageFromEngine::AllOrdersCancelled(orders));
 
                 message
-            }
+            },
+
+            MessageFromApi::GetAllOpenOrders(payload) => {
+
+                publish_on_channel = payload.user_id.clone();
+
+                let get_all_orders_res = self.get_all_open_orders(&payload.user_id);
+
+                let message = get_all_orders_res.
+                map(|orders| MessageFromEngine::AllOpenOrders(orders));
+
+                message
+            },
 
             
         };
