@@ -6,7 +6,8 @@ use crate::types::{order::{OrderSide, Price, Quantity}};
 pub enum MessageFromEngine{
     OrderPlaced(OrderPlacedResponse),
     OrderCancelled(OrderCancelledResponse),
-    AllOrdersCancelled(OrdersCancelledResponse)
+    AllOrdersCancelled(OrdersCancelledResponse),
+    AllOpenOrders(AllOpenOrdersResponse),
 }
 
 type EngineResult<T> = Result<T, ()>;
@@ -25,6 +26,10 @@ impl MessageFromEngine{
             },
             MessageFromEngine::AllOrdersCancelled(data) => {
                 let ok_data: EngineResult<&OrdersCancelledResponse> = Ok(data);
+                serde_json::to_string(&ok_data).unwrap_or_else(|_|err_msg)
+            },
+            MessageFromEngine::AllOpenOrders(data) => {
+                let ok_data: EngineResult<&AllOpenOrdersResponse> = Ok(data);
                 serde_json::to_string(&ok_data).unwrap_or_else(|_|err_msg)
             }
         }   
@@ -63,3 +68,14 @@ pub struct CancelAllOrders {
 }
 
 pub type OrdersCancelledResponse = Vec<CancelAllOrders>;
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct OpenOrder{
+    pub order_id: String,
+    pub quantity: Quantity,
+    pub executed_quantity: Quantity,
+    pub side: OrderSide,
+    pub price: Price,
+}
+
+pub type AllOpenOrdersResponse = Vec<OpenOrder>;

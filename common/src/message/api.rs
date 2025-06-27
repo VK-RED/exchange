@@ -7,6 +7,7 @@ pub enum MessageFromApi{
     CreateOrder(CreateOrderPayload),
     CancelOrder(CancelOrderPayload),
     CancelAllOrders(CancelOrdersPayload),
+    GetAllOpenOrders(OpenOrdersPayload)
 }
 
 impl MessageFromApi {
@@ -15,6 +16,7 @@ impl MessageFromApi {
             MessageFromApi::CreateOrder(order) => &order.market,
             MessageFromApi::CancelOrder(order) => &order.market,
             MessageFromApi::CancelAllOrders(order) => &order.market,
+            MessageFromApi::GetAllOpenOrders(order) => &order.market,
         }
     }
 
@@ -23,6 +25,7 @@ impl MessageFromApi {
             MessageFromApi::CreateOrder(order) => order.id.clone(),
             MessageFromApi::CancelOrder(order) => order.order_id.clone(),
             MessageFromApi::CancelAllOrders(order) => order.user_id.clone(), // send message on the users channel
+            MessageFromApi::GetAllOpenOrders(order) => order.user_id.clone(), // send message on the users channel
         }
     }
 }
@@ -47,6 +50,12 @@ pub struct CancelOrderPayload {
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct CancelOrdersPayload {
+    pub market: String,
+    pub user_id: String,
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub struct OpenOrdersPayload{
     pub market: String,
     pub user_id: String,
 }
