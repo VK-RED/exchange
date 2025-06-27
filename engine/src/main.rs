@@ -97,7 +97,7 @@ fn main() {
                             match tx_res {
                                 None => {
                                     println!("No tx found for the market : {}", market);
-                                    redis.publish_message_to_api(channel_to_publish, Err(EngineError::InternalError));
+                                    redis.publish_message_to_api(channel_to_publish, Err(EngineError::InvalidMarket));
                                 },
                                 Some(tx) => {
                                     let tx_send_err = format!("Error while sending order to the orderbook : {}",market);

@@ -15,7 +15,9 @@ pub enum EngineError {
     #[error("Internal Server Error")]
     InternalError,
     #[error("User does not have sufficient balance")]
-    InsufficientBalance
+    InsufficientBalance,
+    #[error("Please Enter Valid Market")]
+    InvalidMarket,
 }
 
 impl EngineError {
