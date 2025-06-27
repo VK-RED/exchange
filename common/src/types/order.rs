@@ -9,6 +9,7 @@ pub struct Fill{
     pub order_id: String,
     pub trade_id: u32,
     pub quantity: Quantity,
+    pub filled_quantity: Quantity,
     pub maker_id: String,
     pub price: Price
 }
