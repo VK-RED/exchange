@@ -1,7 +1,7 @@
 use std::{collections::{HashMap, HashSet}, sync::{Arc, Mutex}};
 use common::{message::{api::{CancelOrderPayload, MessageFromApi}, engine::{CancelAllOrders, MessageFromEngine, OpenOrder, OrderCancelledResponse, OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType, Price}};
 use rust_decimal::{dec, Decimal, prelude::ToPrimitive};
-use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{EngineError}, order::Order, services::redis::RedisService};
+use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{EngineError}, order::{Order, OrdersWithQuantity}, services::redis::RedisService};
 
 const QUOTE:&str = "USDC";
 const QUOTE_LAMPORTS:u64 = 1000_000;
@@ -12,8 +12,8 @@ pub struct OrderBook {
     pub base_decimals: u8,
     pub market: String,
     pub trade_id: u32,
-    pub bids: HashMap<Price,Vec<Order>>,    
-    pub asks: HashMap<Price,Vec<Order>>,
+    pub bids: HashMap<Price,OrdersWithQuantity>,    
+    pub asks: HashMap<Price,OrdersWithQuantity>,
     pub last_price: Price,
 }
 
@@ -153,15 +153,15 @@ impl OrderBook {
 
     }
 
-    pub fn get_desc_bids(&mut self) -> Vec<(&Price, &mut Vec<Order>)>{
-        let mut bids:Vec<(&Price, &mut Vec<Order>)> = self.bids.iter_mut().collect();
+    pub fn get_desc_bids(&mut self) -> Vec<(&Decimal, &mut OrdersWithQuantity)>{
+        let mut bids:Vec<(&Decimal, &mut OrdersWithQuantity)> = self.bids.iter_mut().collect();
         bids.sort_by(|a, b| b.0.cmp(a.0));
         bids
     }
 
-    pub fn get_asc_asks(&mut self) -> Vec<(&Price, &mut Vec<Order>)>{
+    pub fn get_asc_asks(&mut self) -> Vec<(&Decimal, &mut OrdersWithQuantity)>{
 
-        let mut asks:Vec<(&Price, &mut Vec<Order>)> = self.asks.iter_mut().collect();
+        let mut asks:Vec<(&Decimal, &mut OrdersWithQuantity)> = self.asks.iter_mut().collect();
         asks.sort_by(|a, b| a.0.cmp(b.0));
         asks
     }
@@ -172,7 +172,7 @@ impl OrderBook {
         complete_fill_orders:Vec<CompleteFill>,
         filled_side: OrderSide,
     ){
-        let orderside = match filled_side {
+        let price_w_orders_n_quantity = match filled_side {
             OrderSide::Buy => {
                 &mut self.bids
             },
@@ -183,13 +183,16 @@ impl OrderBook {
 
         for complete_fill_order in complete_fill_orders {
 
-            let price = orderside.get_mut(&complete_fill_order.price);
+            let orders_and_quantity = price_w_orders_n_quantity.get_mut(&complete_fill_order.price);
             
-            match price {
+            match orders_and_quantity {
 
-                Some(orders) => {
+                Some(orders_and_quantity) => {
+
+                    let orders = &mut orders_and_quantity.orders;
+
                     let complete_fill_order_id = complete_fill_order.order_id;
-
+                    
                     println!(
                         "removing complete order: {} from book with price :{} on side : {:?}", 
                         complete_fill_order_id, 
@@ -203,7 +206,7 @@ impl OrderBook {
                     // remove the price entry when there are no orders
                     if orders.len() == 0 {
                         println!("removing price entry : {} from {:?}", &complete_fill_order.price, filled_side);
-                        orderside.remove(&complete_fill_order.price);
+                        price_w_orders_n_quantity.remove(&complete_fill_order.price);
                     }
                 },
                 None => {
@@ -231,7 +234,7 @@ impl OrderBook {
         let opposing_side_with_orders = match order.side{
 
             OrderSide::Buy => {
-                let asks: Vec<(&Price, &mut Vec<Order>)> = self.get_asc_asks();
+                let asks = self.get_asc_asks();
                 asks
             },
             OrderSide::Sell => {
@@ -240,7 +243,7 @@ impl OrderBook {
             }
         };
 
-        for (opposing_price, opposing_orders) in opposing_side_with_orders {
+        for (opposing_price, orders_with_quantity) in opposing_side_with_orders {
 
             let can_match_orders = match order.side {
                 OrderSide::Buy => {
@@ -256,6 +259,9 @@ impl OrderBook {
                 break;
             }
 
+            let opposing_orders = orders_with_quantity.orders.iter_mut();
+            let mut opposing_total_quantity = &mut orders_with_quantity.total_quantity;
+
             for opposing_order in opposing_orders {
 
                 if remaining_quantity == dec!(0){
@@ -265,8 +271,11 @@ impl OrderBook {
                 let filled_quantity = (opposing_order.quantity - opposing_order.filled).min(remaining_quantity);
                 
                 remaining_quantity -= filled_quantity;
+
                 opposing_order.filled += filled_quantity;
                 order.filled += filled_quantity;
+
+                opposing_total_quantity -= filled_quantity;
 
                 trade_id+=1;
                 last_price = *opposing_price;
@@ -317,7 +326,7 @@ impl OrderBook {
 
         let price = order.price;
 
-        let orderside = match order.side {
+        let price_w_orders_n_qty = match order.side {
             OrderSide::Buy => {
                 &mut self.bids
             },
@@ -326,17 +335,21 @@ impl OrderBook {
             }
         };
 
-        let orders_res = orderside.get_mut(&price);
+        let orders_w_qty_res = price_w_orders_n_qty.get_mut(&price);
 
-        match orders_res {
-            Some(orders) => {
+        match orders_w_qty_res {
+            Some(orders_w_quantity) => {
                 println!("addding {:?} in existing price orders on {:?}", &order, &order.side);
-                orders.push(order);
+                let order_qty = order.quantity - order.filled;
+                orders_w_quantity.orders.push(order);
+                orders_w_quantity.total_quantity += order_qty;
             },
             None => {
                 println!("addding  {:?} in new price orders on {:?}", &order, &order.side);
+                let remaining_qty = order.quantity - order.filled;
                 let orders = vec![order];
-                orderside.insert(price, orders);
+                let orders_w_qty = OrdersWithQuantity::new(remaining_qty, orders);
+                price_w_orders_n_qty.insert(price, orders_w_qty);
             }
         }
 
@@ -450,7 +463,7 @@ impl OrderBook {
         let price = order.price;
         let quantities_to_match = order.quantity;
 
-        let orderside = match order.side {
+        let price_w_orders_n_qty = match order.side {
             OrderSide::Buy => {
                 &self.asks
             },
@@ -459,7 +472,7 @@ impl OrderBook {
             }
         };
 
-        match orderside.get(&price) {
+        match price_w_orders_n_qty.get(&price) {
             None => {
                 // throw error order cannot be matched
                 println!("
@@ -471,14 +484,9 @@ impl OrderBook {
                 Err(EngineError::PartialOrderFill)
                 
             },
-            Some(orders) => {
+            Some(orders_w_qty) => {
 
-                let mut available_quantities = dec!(0);
-
-                for order in orders.iter(){
-                    let quantity = order.quantity;
-                    available_quantities += quantity;
-                }
+                let available_quantities = orders_w_qty.total_quantity;
 
                 if available_quantities >= quantities_to_match {
                     Ok(())
@@ -628,17 +636,19 @@ impl OrderBook {
         user_id:&String,
     ) -> Result<Option<(OrderCancelledResponse, Decimal)>, EngineError>{    
 
-        let side_with_orders = match side{
+        let price_w_orders_n_qty = match side{
             OrderSide::Buy => &mut self.bids,
             OrderSide::Sell => &mut self.asks,
         };
 
-        for (price, orders) in side_with_orders{
+        let mut final_res = None;
+
+        for (price, orders_w_qty) in price_w_orders_n_qty.iter_mut(){
 
             let mut target_order_index = -1;
 
             //iterate through orders of the price range
-            for (index, order) in orders.iter().enumerate() {
+            for (index, order) in orders_w_qty.orders.iter().enumerate() {
                 if order.id == *target_order_id {
                     target_order_index = index as i32;
                     break;
@@ -650,7 +660,7 @@ impl OrderBook {
 
                 let target_order_index = target_order_index as usize;
 
-                match orders.get(target_order_index) {
+                match orders_w_qty.orders.get(target_order_index) {
 
                     Some(target_order) => {
 
@@ -659,7 +669,14 @@ impl OrderBook {
                             return Err(EngineError::MismatchUser);                            
                         }
 
-                        let order = orders.remove(target_order_index);
+                        let order = orders_w_qty.orders.remove(target_order_index);
+                        let unfilled_qty = order.quantity - order.filled;
+
+                        println!("No of Quantities: {} in price : {} on  {:?} before updating", orders_w_qty.total_quantity, price, side);
+
+                        orders_w_qty.total_quantity -= unfilled_qty;
+
+                        println!("No of Quantities: {} in price : {} on  {:?} after updating", orders_w_qty.total_quantity, price, side);
 
                         let order_cancelled = OrderCancelledResponse {
                             order_id: order.id,
@@ -669,9 +686,8 @@ impl OrderBook {
                         };
 
                         println!("cancelled order : {:?}", order_cancelled);
-
-                        return Ok(Some((order_cancelled, *price)));
-
+                        final_res = Some((order_cancelled, *price));
+                        break;
                     },
                     None =>{
                         println!("Cannnot find target order to cancel in orders at index : {}", target_order_index);
@@ -681,7 +697,23 @@ impl OrderBook {
             }
         }
 
-        Ok(None)
+        match final_res {
+            Some(res) => {
+
+                let price = res.1;
+
+                // if there are no orders available the clearup the price and orders
+
+                if let Some(orders_w_qty) = price_w_orders_n_qty.get(&price) {
+                    if orders_w_qty.orders.len() == 0 {
+                        price_w_orders_n_qty.remove(&price);                        
+                    }
+                }
+
+                Ok(Some(res))
+            },
+            None => Ok(None)
+        }
 
     }   
 
@@ -730,7 +762,7 @@ impl OrderBook {
         side: OrderSide,
         cancelled_orders: &mut Vec<CancelAllOrders>
     ){
-        let orders_with_side = match side{
+        let price_w_orders_n_qty = match side{
             OrderSide::Buy =>{
                 &mut self.bids
             },
@@ -743,20 +775,23 @@ impl OrderBook {
 
         // iterate through all the price range and find the orders to remove
         // using iter as to aboid value getting consumed
-        for (price, orders) in orders_with_side.iter_mut() {
+        for (price, orders_w_qty) in price_w_orders_n_qty.iter_mut() {
 
             let mut orders_to_remove = HashSet::new();
 
             // using iter as to avoid orders getting consumed
-            for order in orders.iter() {
+            for order in orders_w_qty.orders.iter() {
                 if order.user_id == user_id {
                     orders_to_remove.insert(order.id.clone());
                 }
             }
 
-            orders.retain(|order| {
+            orders_w_qty.orders.retain(|order| {
 
                 if orders_to_remove.contains(&order.id) {
+
+                    let unfilled_qty = order.quantity - order.filled;
+                    orders_w_qty.total_quantity -= unfilled_qty;
 
                     println!("order cancelled: {:?}", order);
 
@@ -777,7 +812,7 @@ impl OrderBook {
 
             // if there are no orders, then remove the price
             
-            if orders.len() == 0 {
+            if orders_w_qty.orders.len() == 0 {
                 println!("no orders left in price : {} on : {:?}", price, side);
                 price_with_empty_orders.push(price.clone());
             }
@@ -785,7 +820,7 @@ impl OrderBook {
         }
 
         for price in price_with_empty_orders {
-            orders_with_side.remove(&price);
+            price_w_orders_n_qty.remove(&price);
         }
         
 
@@ -862,13 +897,13 @@ impl OrderBook {
         side: OrderSide,
         open_orders: &mut Vec<OpenOrder>
     ){
-        let orders_with_side = match side {
+        let price_w_orders_n_qty = match side {
             OrderSide::Buy => &self.bids,
             OrderSide::Sell => &self.asks,
         };
 
-        for (_price, orders) in orders_with_side {
-            for order in orders {
+        for (_price, orders_w_qty) in price_w_orders_n_qty {
+            for order in orders_w_qty.orders.iter() {
                 if order.user_id == user_id {
                     let open_order = OpenOrder {
                         executed_quantity: order.filled,

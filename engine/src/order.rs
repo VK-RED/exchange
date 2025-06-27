@@ -42,3 +42,15 @@ impl PartialEq for Order {
         self.id == other.id
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct OrdersWithQuantity{
+    pub orders: Vec<Order>,
+    pub total_quantity: Quantity,
+}
+
+impl OrdersWithQuantity {
+    pub fn new(total_quantity: Quantity, orders: Vec<Order>) -> Self {
+        Self { orders, total_quantity }
+    }
+}
