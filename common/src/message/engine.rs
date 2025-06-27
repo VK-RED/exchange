@@ -51,8 +51,10 @@ pub struct OrderPlacedResponse {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct OrderFill{
+    pub order_id: String,
     pub price: Price,
     pub quantity: Quantity,
+    pub filled_quantity: Quantity,
     pub trade_id: u32,
 }
 
