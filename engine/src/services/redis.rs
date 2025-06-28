@@ -1,7 +1,8 @@
-use common::message::{db_filler::{AddOrderToDb, DbFillerMessage, Trade, UpdateOrder}, engine::MessageFromEngine};
+use common::message::{db_filler::{AddOrderToDb, DbFillerMessage, Trade, UpdateOrder}, engine::MessageFromEngine, ws::{DepthUpdate, TradeUpdate, WsMessage}};
 use r2d2_redis::{r2d2::{Pool, PooledConnection}, redis::{Commands, RedisError}, RedisConnectionManager};
+use rust_decimal::Decimal;
 
-use crate::errors::EngineError;
+use crate::{errors::EngineError, orderbook::PriceWithDepth};
 
 pub type RedisResponse = Result<(), r2d2_redis::redis::RedisError>;
 
@@ -32,7 +33,7 @@ impl RedisService {
         Some(conn)
     }
 
-    pub fn publish_to_db_filler(&self, mut conn: PooledConnection<RedisConnectionManager>, message:DbFillerMessage){
+    fn publish_to_db_filler(&self, mut conn: PooledConnection<RedisConnectionManager>, message:DbFillerMessage){
 
         let serialized_message = serde_json::to_string(&message);
 
@@ -47,6 +48,29 @@ impl RedisService {
             },
             Err(e) => {
                 println!("error while serializing message for db filler in update db orders : {} ", e);
+            }
+        }
+    }
+
+    fn publish_to_ws(
+        &self, 
+        channel:&str,
+        mut conn: PooledConnection<RedisConnectionManager>, 
+        message:WsMessage
+    ){
+        let serialized_message = serde_json::to_string(&message);
+
+        match serialized_message{
+            Ok(serialized) => {
+
+                let redis_res:RedisResponse = conn.publish(channel, serialized);
+
+                if let Err(e) = redis_res {
+                    println!("Error:{} while publishing to wss", e);
+                }
+            },
+            Err(e) => {
+                println!("error while serializing message for wss : {} ", e);
             }
         }
     }
@@ -137,6 +161,74 @@ impl RedisService {
                 None
             }
         }
+    }
+
+    pub fn publish_ws_trade(&self, market:&str, trades:&Vec<Trade>){
+
+        println!("ws trade : {:?}", trades);
+
+        let channel = format!("trade@{}", market);
+
+        let conn_res = self.get_conn();
+
+        if let None = conn_res {
+            return;
+        }
+
+        let conn = conn_res.unwrap();
+
+        let trade_updates: Vec<TradeUpdate> = trades.iter().map(|trade| TradeUpdate {
+            e: "trade".to_string(),
+            p: trade.price,
+            q: trade.quantity,
+            s: trade.market.clone(),
+            t: trade.id,
+        }).collect();
+
+        let message = WsMessage::Trade(trade_updates);
+
+        self.publish_to_ws(&channel, conn, message);
+        
+    }
+
+    pub fn publish_ws_depth(
+        &self, 
+        market:&str,
+        price_w_depth: Option<PriceWithDepth>
+    ){
+        println!("price_w_depth : {:?}", price_w_depth);
+        let channel = format!("depth@{}", market);
+
+        let conn_res = self.get_conn();
+
+        if let None = conn_res {
+            return;
+        }
+
+        let conn = conn_res.unwrap();
+
+        let depth_update = match price_w_depth {
+            Some(depth) => {
+
+                let bids:Vec<[Decimal;2]> = depth.updated_bids.iter()
+                .map(|(price, qty)| [*price, *qty])
+                .collect();
+                
+                let asks:Vec<[Decimal;2]> = depth.updated_asks.iter()
+                .map(|(price, qty)| [*price, *qty])
+                .collect();
+
+                DepthUpdate::from_value(bids, asks)
+            },
+            None => {
+                println!("no depth to update to wss!");
+                DepthUpdate::new()
+            }
+        };
+
+        let message = WsMessage::Depth { depth: depth_update };
+
+        self.publish_to_ws(&channel, conn, message);
     }
 
 }
