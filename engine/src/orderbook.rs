@@ -1,5 +1,5 @@
 use std::{collections::{HashMap, HashSet}, sync::{Arc, Mutex}};
-use common::{message::{api::{CancelOrderPayload, MessageFromApi}, db_filler::{AddOrderToDb, OrderStatus, Trade, UpdateOrder}, engine::{CancelAllOrders, DepthResponse, MessageFromEngine, OpenOrder, OrderCancelledResponse, OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType, Price}};
+use common::{message::{api::{CancelOrderPayload, MessageFromApi}, db_filler::{AddOrderToDb, OrderStatus, Trade, UpdateOrder}, engine::{CancelAllOrders, DepthResponse, MessageFromEngine, OpenOrder, OrderCancelledResponse, OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType, Price, Quantity}};
 use rust_decimal::{dec, Decimal, prelude::ToPrimitive};
 use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{EngineError}, order::{Order, OrdersWithQuantity}, services::redis::RedisService};
 
@@ -21,6 +21,33 @@ pub struct OrderBook {
 pub struct CompleteFill {
     pub order_id: String,
     pub price: Price,
+}
+
+#[derive(Debug)]
+pub struct PriceWithDepth{
+    pub updated_bids: HashMap<Price,Quantity>,
+    pub updated_asks: HashMap<Price,Quantity>,
+}
+
+impl PriceWithDepth{
+    pub fn new() -> Self{
+        Self {
+            updated_asks: HashMap::new(),
+            updated_bids: HashMap::new(),
+        }
+    }
+
+    pub fn update_depth(&mut self, side: OrderSide, price: Price, quantity:Quantity){
+        match side{
+            OrderSide::Buy => {
+                self.updated_bids.insert(price, quantity);
+            },
+            OrderSide::Sell => {
+                self.updated_asks.insert(price, quantity);
+            }
+        }
+    }
+    
 }
 
 impl OrderBook {
@@ -220,7 +247,8 @@ impl OrderBook {
 
     pub fn match_opposing_orders(
         &mut self,
-        order:&mut Order
+        order:&mut Order,
+        price_w_updated_depths: &mut PriceWithDepth,
     ) -> (Vec<Fill>, Vec<CompleteFill>){
 
         let mut remaining_quantity = order.quantity;
@@ -277,6 +305,10 @@ impl OrderBook {
 
                 opposing_total_quantity -= filled_quantity;
 
+                let opposing_side= order.get_opposing_side();
+
+                price_w_updated_depths.update_depth(opposing_side,*opposing_price, *opposing_total_quantity);
+                
                 trade_id+=1;
                 last_price = *opposing_price;
 
@@ -323,9 +355,14 @@ impl OrderBook {
     }
 
 
-    pub fn add_order(&mut self, order:Order){
+    pub fn add_order(
+        &mut self, 
+        order:Order,
+        price_w_updated_depths: &mut PriceWithDepth,
+    ){
 
         let price = order.price;
+        let order_side = order.side;
 
         let price_w_orders_n_qty = match order.side {
             OrderSide::Buy => {
@@ -344,12 +381,17 @@ impl OrderBook {
                 let order_qty = order.quantity - order.filled;
                 orders_w_quantity.orders.push(order);
                 orders_w_quantity.total_quantity += order_qty;
+
+                let total_quantity = orders_w_quantity.total_quantity;
+
+                price_w_updated_depths.update_depth(order_side,price,total_quantity);
             },
             None => {
                 println!("addding  {:?} in new price orders on {:?}", &order, &order.side);
                 let remaining_qty = order.quantity - order.filled;
                 let orders = vec![order];
                 let orders_w_qty = OrdersWithQuantity::new(remaining_qty, orders);
+                price_w_updated_depths.update_depth(order_side,price, remaining_qty);
                 price_w_orders_n_qty.insert(price, orders_w_qty);
             }
         }
@@ -512,7 +554,7 @@ impl OrderBook {
         &mut self, 
         order:&mut Order,
         user_balances:Arc<Mutex<UserAssetBalance>>,
-    ) -> Result<OrderPlacedResponse, EngineError>{
+    ) -> Result<(OrderPlacedResponse, PriceWithDepth), EngineError>{
 
         /*
             - Check user has enough balance
@@ -528,6 +570,8 @@ impl OrderBook {
 
         let maker_side = order.get_opposing_side();
 
+        let mut price_w_depth = PriceWithDepth::new();
+
         if order.order_type == OrderType::Market {
             self.can_place_market_order(order)?;
         }
@@ -537,13 +581,13 @@ impl OrderBook {
         let (
             filled_orders,
             complete_fill_orders
-        ) = self.match_opposing_orders(order);
+        ) = self.match_opposing_orders(order, &mut price_w_depth);
         
         self.remove_complete_filled_orders(complete_fill_orders, maker_side);
 
         // sit on the orderbook !!
         if order.filled < order.quantity {
-            self.add_order(order.clone());
+            self.add_order(order.clone(), &mut price_w_depth);
         }   
 
         self.settle_user_balance(
@@ -567,7 +611,7 @@ impl OrderBook {
             fills: filled_orders,
         };
 
-        Ok(order_placed)
+        Ok((order_placed, price_w_depth))
     }
 
     pub fn settle_balance_after_cancel(
@@ -637,6 +681,7 @@ impl OrderBook {
         side:OrderSide,
         target_order_id: &String,
         user_id:&String,
+        price_w_updated_depths: &mut PriceWithDepth
     ) -> Result<Option<(OrderCancelledResponse, Decimal)>, EngineError>{    
 
         let price_w_orders_n_qty = match side{
@@ -678,6 +723,10 @@ impl OrderBook {
                         println!("No of Quantities: {} in price : {} on  {:?} before updating", orders_w_qty.total_quantity, price, side);
 
                         orders_w_qty.total_quantity -= unfilled_qty;
+
+                        let total_quantity = orders_w_qty.total_quantity;
+
+                        price_w_updated_depths.update_depth(side, *price, total_quantity);
 
                         println!("No of Quantities: {} in price : {} on  {:?} after updating", orders_w_qty.total_quantity, price, side);
 
@@ -724,13 +773,16 @@ impl OrderBook {
         &mut self,
         order_payload:CancelOrderPayload,
         user_balances:Arc<Mutex<UserAssetBalance>>,
-    ) -> Result<OrderCancelledResponse, EngineError>{
+    ) -> Result<(OrderCancelledResponse, PriceWithDepth), EngineError>{
         let mut order_cancelled_res;
+
+        let mut price_w_updated_depth = PriceWithDepth::new();
 
         order_cancelled_res = self.cancel_order_in_side(
             OrderSide::Buy, 
             &order_payload.order_id,
             &order_payload.user_id,
+            &mut price_w_updated_depth
         )?;
 
         if order_cancelled_res.is_none() {
@@ -738,6 +790,7 @@ impl OrderBook {
                 OrderSide::Sell, 
                 &order_payload.order_id,
                 &order_payload.user_id,
+                &mut price_w_updated_depth
             )?;
         }
 
@@ -749,7 +802,7 @@ impl OrderBook {
                     price,
                     user_balances
                 )?;
-                Ok(res)
+                Ok((res, price_w_updated_depth))
             },
             None => {
                 Err(EngineError::InvalidOrderId)
@@ -763,7 +816,8 @@ impl OrderBook {
         &mut self,
         user_id: &str,
         side: OrderSide,
-        cancelled_orders: &mut Vec<CancelAllOrders>
+        cancelled_orders: &mut Vec<CancelAllOrders>,
+        price_w_updated_depths: &mut PriceWithDepth
     ){
         let price_w_orders_n_qty = match side{
             OrderSide::Buy =>{
@@ -813,6 +867,13 @@ impl OrderBook {
                 return true;
             });
 
+            let total_quantity = orders_w_qty.total_quantity;
+
+            // update depth only if orders has removed on the price range
+            if orders_to_remove.len() > 0 {
+                price_w_updated_depths.update_depth(side, *price, total_quantity);
+            }
+
             // if there are no orders, then remove the price
             
             if orders_w_qty.orders.len() == 0 {
@@ -833,20 +894,24 @@ impl OrderBook {
         &mut self,
         user_id: &str,
         user_balances:Arc<Mutex<UserAssetBalance>>,
-    )-> Result<Vec<CancelAllOrders>, EngineError>{
+    )-> Result<(Vec<CancelAllOrders>, PriceWithDepth), EngineError>{
 
         let mut cancelled_orders: Vec<CancelAllOrders> = vec![];
-        
+
+        let mut price_w_depths = PriceWithDepth::new();
+
         self.cancel_all_orders_on_side(
             user_id, 
             OrderSide::Buy, 
-            &mut cancelled_orders
+            &mut cancelled_orders,
+            &mut price_w_depths,
         );
 
         self.cancel_all_orders_on_side(
             user_id, 
             OrderSide::Sell, 
-            &mut cancelled_orders
+            &mut cancelled_orders,
+            &mut price_w_depths,
         );
 
         let mut guard = user_balances.lock().unwrap();
@@ -890,7 +955,7 @@ impl OrderBook {
         }
 
 
-        Ok(cancelled_orders)
+        Ok((cancelled_orders, price_w_depths))
 
     }
 
@@ -998,10 +1063,13 @@ impl OrderBook {
                 let mut orders_to_update:Vec<UpdateOrder> = vec![];
 
                 let mut trades = vec![];
+                let mut price_w_depth_to_update = None;
 
                 let message = match res {
 
-                    Ok(order_placed) => {
+                    Ok((order_placed, price_w_depth)) => {
+
+                        price_w_depth_to_update = Some(price_w_depth);
 
                         let order_status = if order.quantity == order_placed.executed_quantity {OrderStatus::Filled} else {OrderStatus::Open};
 
@@ -1038,7 +1106,7 @@ impl OrderBook {
                                 id: fill.trade_id,
                                 price: fill.price,
                                 quantity: fill.filled_quantity,
-                                quote_qty: order.price * fill.filled_quantity,
+                                quote_qty: (order.price * fill.filled_quantity).trunc_with_scale(6),
                                 market: self.market.clone(),
                                 // TOD0: FIX THIS
                                 timestamp: 0,
@@ -1055,7 +1123,8 @@ impl OrderBook {
                 };
 
                 redis.publish_message_to_api(publish_on_channel, message);
-                // publish to update_db
+                redis.publish_ws_trade(&order.market, &trades);
+                redis.publish_ws_depth(&order.market, price_w_depth_to_update);
                 redis.publish_trades_to_db(trades);
                 redis.update_db_orders(order_to_add, orders_to_update);
                 
@@ -1063,10 +1132,14 @@ impl OrderBook {
 
             MessageFromApi::CancelOrder(order_payload) => {
                 publish_on_channel = order_payload.order_id.clone();
+                let market = order_payload.market.clone();
                 let cancel_order_res = self.cancel_order(order_payload, user_balances);
 
+                let mut updated_depths = None;
+
                 let message = match cancel_order_res {
-                    Ok(order_cancel) => {
+                    Ok((order_cancel, price_w_depth)) => {
+                        updated_depths = Some(price_w_depth);
                         Ok(MessageFromEngine::OrderCancelled(order_cancel))
                     },
                     Err(e) => {
@@ -1077,19 +1150,24 @@ impl OrderBook {
                 let order_id = publish_on_channel.clone();
 
                 redis.publish_message_to_api(publish_on_channel, message);
+                redis.publish_ws_depth(&market, updated_depths);
                 redis.publish_cancel_order_updates(vec![order_id]);
             },
 
             MessageFromApi::CancelAllOrders(payload) => {
 
                 publish_on_channel = payload.user_id.clone();
+                let market = &payload.market;
                 
+                let mut updated_depths = None;
                 let cancel_all_orders_res = self.cancel_all_orders(&payload.user_id, user_balances);
 
                 let mut cancelled_orders = vec![];
 
                 let message = cancel_all_orders_res.
-                map(|orders|{
+                map(|(orders, price_w_depth)|{
+
+                    updated_depths = Some(price_w_depth);
 
                     for order in orders.iter() {
                         cancelled_orders.push(order.order_id.clone());
@@ -1099,6 +1177,7 @@ impl OrderBook {
                 } );
 
                 redis.publish_message_to_api(publish_on_channel, message);
+                redis.publish_ws_depth(market, updated_depths);
                 redis.publish_cancel_order_updates(cancelled_orders);
             },
 
