@@ -165,8 +165,6 @@ impl RedisService {
 
     pub fn publish_ws_trade(&self, market:&str, trades:&Vec<Trade>){
 
-        println!("ws trade : {:?}", trades);
-
         let channel = format!("trade@{}", market);
 
         let conn_res = self.get_conn();
@@ -196,7 +194,7 @@ impl RedisService {
         market:&str,
         price_w_depth: Option<PriceWithDepth>
     ){
-        println!("price_w_depth : {:?}", price_w_depth);
+
         let channel = format!("depth@{}", market);
 
         let conn_res = self.get_conn();
