@@ -440,7 +440,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd"
 dependencies = [
  "bytes",
+ "futures-core",
  "memchr",
+ "pin-project-lite",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -494,6 +498,12 @@ dependencies = [
 [[package]]
 name = "db_filler"
 version = "0.1.0"
+dependencies = [
+ "common",
+ "dotenv",
+ "redis 0.32.0",
+ "tokio",
+]
 
 [[package]]
 name = "debug-builders"
@@ -654,9 +664,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9fa08315bb612088cc391249efdc3bc77536f16c91f6cf495e6fbe85b20a4a81"
 dependencies = [
  "futures-core",
+ "futures-sink",
  "futures-task",
  "pin-project-lite",
  "pin-utils",
+ "slab",
 ]
 
 [[package]]
@@ -1294,14 +1306,20 @@ version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd673deb3d184140109c1e27b043c2354cb79399c3ef304c365fc628092ed773"
 dependencies = [
+ "bytes",
+ "cfg-if",
  "combine",
+ "futures-util",
  "itoa 1.0.15",
  "num-bigint",
  "percent-encoding",
+ "pin-project-lite",
  "r2d2 0.8.10",
  "ryu",
  "sha1_smol",
  "socket2",
+ "tokio",
+ "tokio-util",
  "url",
 ]
 
@@ -1715,7 +1733,19 @@ dependencies = [
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",
+ "tokio-macros",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "tokio-macros"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e06d43f1345a3bcd39f6a56dbb7dcab2ba47e68e8ac134855e7e2bdbaf8cab8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.101",
 ]
 
 [[package]]
