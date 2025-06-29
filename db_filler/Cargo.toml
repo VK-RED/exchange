@@ -8,3 +8,4 @@ dotenv = { workspace = true }
 common = { workspace = true }
 redis = { workspace = true }
 tokio = { workspace = true }
+sqlx = { workspace = true }
