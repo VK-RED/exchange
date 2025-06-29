@@ -13,6 +13,17 @@ pub enum DbFillerMessage{
     UpdateCancelOrders(Vec<String>)
 }
 
+impl DbFillerMessage {
+    pub fn get_deserialized(message:&str) -> Option<DbFillerMessage>{
+        let res = serde_json::from_str(message)
+        .map_or(None, |val:DbFillerMessage|{
+            Some(val)
+        });
+
+        res
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 pub enum OrderStatus{
     Open,
