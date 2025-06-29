@@ -1,14 +1,10 @@
-use common::message::{db_filler::{AddOrderToDb, DbFillerMessage, Trade, UpdateOrder}, engine::MessageFromEngine, ws::{DepthUpdate, TradeUpdate, WsMessage}};
+use common::{channel::{DB_CHANNEL, ORDER_CHANNEL}, message::{db_filler::{AddOrderToDb, DbFillerMessage, Trade, UpdateOrder}, engine::MessageFromEngine, ws::{DepthUpdate, TradeUpdate, WsMessage}}};
 use r2d2_redis::{r2d2::{Pool, PooledConnection}, redis::{Commands, RedisError}, RedisConnectionManager};
 use rust_decimal::Decimal;
 
 use crate::{errors::EngineError, orderbook::PriceWithDepth};
 
 pub type RedisResponse = Result<(), r2d2_redis::redis::RedisError>;
-
-// polls the message from this channel, published by the API
-const ORDER_CHANNEL: &'static str = "orders";
-const DB_CHANNEL:&'static str = "db_filler";
 
 #[derive(Debug)]
 pub struct RedisService {

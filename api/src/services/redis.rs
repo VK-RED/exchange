@@ -1,9 +1,7 @@
-use common::message::api::MessageFromApi;
+use common::{channel::ORDER_CHANNEL, message::api::MessageFromApi};
 use r2d2_redis::{r2d2::PooledConnection, redis::{Commands, PubSub}, RedisConnectionManager};
 
 use crate::errors::{ApiError};
-
-const CHANNEL_TO_PUBLISH: &'static str = "orders";
 
 pub type RedisResult = Result<String, r2d2_redis::redis::RedisError>;
 pub type RedisServiceResult<T> = Result<T, ApiError>;
@@ -25,7 +23,7 @@ impl RedisService {
             ApiError::InternalServerError
         })?;
 
-        let _:RedisResult  = self.conn.lpush(CHANNEL_TO_PUBLISH, serialized);
+        let _:RedisResult  = self.conn.lpush(ORDER_CHANNEL, serialized);
 
         Ok(())
     }
