@@ -7,5 +7,5 @@ pub struct Trade {
     pub price: String,
     pub quantity: String,
     pub quote_qty: String,
-    pub timestamp: u32,
+    pub matched_at: u32,
 }
