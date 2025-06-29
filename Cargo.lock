@@ -577,6 +577,8 @@ dependencies = [
  "common",
  "dotenv",
  "redis 0.32.0",
+ "serde",
+ "serde_json",
  "sqlx",
  "tokio",
 ]
