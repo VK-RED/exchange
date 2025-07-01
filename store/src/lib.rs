@@ -1,5 +1,5 @@
 mod order;
 mod trade;
 
-use order::*;
-use trade::*;
+pub use order::*;
+pub use trade::*;
