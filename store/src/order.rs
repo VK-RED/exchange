@@ -47,27 +47,32 @@ impl Order {
 
     pub async fn update_orders(orders:Vec<UpdateDbOrder>, pool:&Pool<Postgres>) -> Result<(), Error>{
 
-        // NOTE: QUERY BUILDER WILL THROW ERROR IF THE TRADES ARE EMPTY
-        // SO RETURN EALRY IF ORDERS ARE EMPTY
-
         if orders.len() == 0{
             return Ok(());
         }
 
-        let mut query_builder: sqlx::QueryBuilder<'_, Postgres> = sqlx::QueryBuilder::new(r#"
-            UPDATE "order"
-            SET filled_quantity = $1, order_status = $2
-            WHERE id = $3;
+        let mut results = vec![];
 
-        "#);
+        for order in orders {
 
-        query_builder.push_values(orders, |mut b, order|{
-            b.push_bind(order.filled_quantity);
-            b.push_bind(order.status);
-            b.push_bind(order.order_id);
-        });
+            let res =  sqlx::query!(
+                r#"
+                    UPDATE "order"
+                    SET filled_quantity = $1, order_status = $2
+                    WHERE id = $3;  
+                "#,
+                order.filled_quantity,
+                order.status,
+                order.order_id
+            )
+            .execute(pool);
 
-        query_builder.build().execute(pool).await?;
+            results.push(res);
+        }
+        
+        for res in results {
+            res.await?;
+        }
 
         Ok(())
 
@@ -77,13 +82,17 @@ impl Order {
 
         let mut query_builder: sqlx::QueryBuilder<'_, Postgres> = sqlx::QueryBuilder::new(r#"
             UPDATE "order"
-            SET order_status = Cancelled
-            WHERE id = $1;
+            SET order_status = 'Cancelled'
+            WHERE id in (
         "#);
 
-        query_builder.push_values(orders, |mut b, order| {
-            b.push_bind(order);
-        });
+        let mut separated = query_builder.separated(", ");
+
+        for order in orders {
+            separated.push_bind(order);
+        }
+
+        separated.push_unseparated(")");
 
         query_builder.build().execute(pool).await?;
 

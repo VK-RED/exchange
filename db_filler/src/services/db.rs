@@ -47,26 +47,22 @@ impl DbManager{
 
                 let update_db_orders: Vec<UpdateDbOrder> = update_orders.into_iter().map(|order|{
 
-                    let status = serde_json::to_string(&order.status).unwrap_or_default();
                     UpdateDbOrder { 
                         order_id: order.order_id, 
                         filled_quantity:order.filled_quantity.to_string(), 
-                        status: status 
+                        status: order.status.to_string(), 
                     }
                 }).collect();
 
                 if let Some(order) = add_order {
 
-                    let status = serde_json::to_string(&order.status).unwrap_or_default();
-                    let side = serde_json::to_string(&order.side).unwrap_or_default();
-
                     let parsed_order = Order{
                         filled_quantity: order.filled_quantity.to_string(),
                         id: order.order_id,
-                        order_status: status,
+                        order_status: order.status.to_string(),
                         price: order.price.to_string(),
                         quantity: order.quantity.to_string(),
-                        side,
+                        side:order.side.to_string(),
                     };
 
                     let res = Order::add_order(parsed_order, &self.pool);
