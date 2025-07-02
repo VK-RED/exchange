@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +20,15 @@ pub struct Fill{
 pub enum OrderSide{
     Buy,
     Sell
+}
+
+impl Display for OrderSide {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Buy => write!(f,"Buy"),
+            Self::Sell => write!(f,"Sell"),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]

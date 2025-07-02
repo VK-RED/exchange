@@ -1,3 +1,5 @@
+use std::{fmt::Display};
+
 use serde::{Deserialize, Serialize};
 
 use crate::types::order::{OrderSide, Price, Quantity};
@@ -29,6 +31,16 @@ pub enum OrderStatus{
     Open,
     Filled,
     Cancelled,
+}
+
+impl Display for OrderStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Open => write!(f, "Open"),
+            Self::Filled => write!(f,"Filled"),
+            Self::Cancelled => write!(f, "Cancelled")
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
