@@ -1,6 +1,6 @@
 [workspace]
 "resolver" = "3"
-members = ["api", "common", "db_filler", "engine", "store"]
+members = ["api", "common", "db_filler", "engine", "store", "wss"]
 
 [workspace.dependencies]
 actix-web = "4.11.0"
@@ -18,3 +18,4 @@ tokio = {version = "1.45.1", features = ["full"]}
 sqlx = {version = "0.8.6", features = ["postgres", "runtime-tokio"]}
 common = {path = "./common"}
 store = {path = "./store"}
+tokio-tungstenite = "*"
