@@ -1,4 +1,4 @@
-use common::{channel::{DB_CHANNEL, ORDER_CHANNEL}, message::{db_filler::{AddOrderToDb, DbFillerMessage, Trade, UpdateOrder}, engine::MessageFromEngine, ws::{DepthUpdate, TradeUpdate, WsMessage}}};
+use common::{channel::{DB_CHANNEL, ORDER_CHANNEL, USER_CHANNEL}, message::{db_filler::{AddOrderToDb, DbFillerMessage, Trade, UpdateOrder}, engine::{MessageFromEngine, UserMessageFromEngine}, ws::{DepthUpdate, TradeUpdate, WsMessage}}};
 use r2d2_redis::{r2d2::{Pool, PooledConnection}, redis::{Commands, RedisError}, RedisConnectionManager};
 use rust_decimal::Decimal;
 
@@ -6,7 +6,7 @@ use crate::{errors::EngineError, orderbook::PriceWithDepth};
 
 pub type RedisResponse = Result<(), r2d2_redis::redis::RedisError>;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RedisService {
     pool: Pool<RedisConnectionManager>,
 }
@@ -157,6 +157,48 @@ impl RedisService {
                 None
             }
         }
+    }
+
+    pub fn get_user_message_from_api(&self) -> Option<String>{
+
+        let mut conn = self.pool.get().unwrap(); 
+
+        let res: Result<Option<String>,RedisError> = conn.rpop(USER_CHANNEL);
+    
+        match res {
+            Ok(message) => {
+                message
+            },
+            Err(e) => {
+                println!("Error while polling from the queue : {}", &e);
+                None
+            }
+        }
+    }
+
+    pub fn publish_user_message_to_api(
+        &self,
+        channel:String,
+        message_res:Result<UserMessageFromEngine, EngineError>,
+    ) {
+
+        let mut conn = self.pool.get().unwrap();
+
+        let serialized = match message_res {
+            Err(e) => {
+                e.to_error_response().serialize_as_err()
+            },
+            Ok(message) => {
+                message.serialize_data_as_ok()
+            }
+        };
+
+        let res:RedisResponse = conn.publish(channel, serialized);        
+
+        if let Err(e) = res {
+            println!("Error while publishing message to api : {}", e);
+        }
+
     }
 
     pub fn publish_ws_trade(&self, market:&str, trades:&Vec<Trade>){
