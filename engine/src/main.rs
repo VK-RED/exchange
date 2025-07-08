@@ -1,13 +1,14 @@
 use std::{sync::{mpsc, Arc, Mutex}, thread};
 use common::message::{api::MessageFromApi};
 
-use crate::{engine::Engine, services::redis::RedisService,errors::EngineError};
+use crate::{engine::Engine, errors::EngineError, services::redis::RedisService, user::User};
 
 mod orderbook;
 mod engine;
 mod errors;
 mod order;
 mod services;
+mod user;
 
 // TOTAL THREADS = 1 MAIN + (1* NO.OF.ORDERBOOKS ) + 1 USER REQ thread 
 
@@ -60,15 +61,28 @@ fn main() {
 
     println!("Spawning a separate thread for handing non-order-processing requests ...");
 
-    // this is typically to handle things like user balance, current price queries etc..
-    thread::spawn(||{
-        loop {
-
-        }
-    });
-
     let pool = engine.redis_pool.clone();
     let redis = RedisService::new(pool);
+
+    let redis_clone = redis.clone();
+    
+    // this is typically to handle things like user balance, current price queries etc..
+    thread::spawn(move ||{
+        loop {
+            let try_message = redis_clone.get_user_message_from_api();
+
+            if let Some(message) = try_message {
+                println!("--------------------------------------------------------");
+                println!("received user message : {}", message);
+                
+                User::process_user_message(
+                    message, 
+                    Arc::clone(&user_balances),
+                    &redis_clone
+                );
+            }
+        }
+    });
 
     loop {
 
