@@ -1,4 +1,4 @@
-use common::{channel::ORDER_CHANNEL, message::api::MessageFromApi};
+use common::{channel::{ORDER_CHANNEL, USER_CHANNEL}, message::api::{MessageFromApi, UserMessageFromApi}};
 use r2d2_redis::{r2d2::PooledConnection, redis::{Commands, PubSub}, RedisConnectionManager};
 
 use crate::errors::{ApiError};
@@ -28,6 +28,17 @@ impl RedisService {
         Ok(())
     }
 
+    pub fn publish_user_message_to_engine(&mut self, message:UserMessageFromApi) -> RedisServiceResult<()> {
+        let serialized = serde_json::to_string(&message).map_err(|_|{
+            println!("Error while serializing message : {:?}", message);
+            ApiError::InternalServerError
+        })?;
+
+        let _:RedisResult  = self.conn.lpush(USER_CHANNEL, serialized);
+
+        Ok(())
+    }
+
 }
 
 pub struct PubSubService<'a>{
@@ -46,6 +57,16 @@ impl<'a> PubSubService<'a> {
             println!("Error while subscribing to channel : {:?}", self.channel);
             ApiError::InternalServerError
         })?;
+        Ok(())
+    }
+
+    pub fn subscribe_to_channel(&mut self, channel:&str) -> RedisServiceResult<()> {
+
+        self.pub_sub.subscribe(channel).map_err(|_|{
+            println!("Error while subscribing to channel : {:?}", channel);
+            ApiError::InternalServerError
+        })?;
+
         Ok(())
     }
 
