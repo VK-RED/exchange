@@ -42,6 +42,36 @@ impl MessageFromEngine{
     }
 }
 
+
+#[derive(Serialize, Deserialize)]
+pub enum UserMessageFromEngine {
+    Balance(UserBalanceResponse),
+}
+
+impl UserMessageFromEngine {
+    pub fn serialize_data_as_ok(&self)->String{
+        let err_msg = String::from("INTERNAL_ERROR");
+        match self{
+            UserMessageFromEngine::Balance(data) => {
+                let ok_data: EngineResult<&UserBalanceResponse> = Ok(data);
+                serde_json::to_string(&ok_data).unwrap_or_else(|_|err_msg)
+            } ,
+        }   
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct UserBalanceResponse {
+    pub user_id: String,
+    pub balances: Vec<AssetAndBalance>
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct AssetAndBalance {
+    pub asset: String,
+    pub balance: u64,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct OrderPlacedResponse {
     pub order_id: String,

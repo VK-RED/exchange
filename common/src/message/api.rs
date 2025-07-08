@@ -33,6 +33,18 @@ impl MessageFromApi {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub enum UserMessageFromApi {
+    // add messages like user create, user deposit
+    Balance(String)
+}
+
+impl UserMessageFromApi {
+    pub fn try_deserialized(serialized:&str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str::<Self>(serialized)
+    }
+}
+
 #[derive(Deserialize, Debug, Serialize, Clone)]
 pub struct CreateOrderPayload {
     pub id: String,
