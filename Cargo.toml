@@ -19,3 +19,4 @@ sqlx = {version = "0.8.6", features = ["postgres", "runtime-tokio"]}
 common = {path = "./common"}
 store = {path = "./store"}
 tokio-tungstenite = "*"
+futures-util = "0.3.31"
