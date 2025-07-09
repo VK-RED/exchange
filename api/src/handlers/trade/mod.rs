@@ -1,7 +1,13 @@
 use actix_web::{get, web::Data, HttpResponse,ResponseError};
+use serde::Serialize;
 use store::Trade;
 
 use crate::{entrypoint::AppState, errors::ApiError};
+
+#[derive(Serialize)]
+pub struct TradeResponse{
+    trades: Vec<Trade>
+}
 
 #[get("/trades")]
 pub async fn get_trade_history(app_state:Data<AppState>) -> HttpResponse{
@@ -11,7 +17,7 @@ pub async fn get_trade_history(app_state:Data<AppState>) -> HttpResponse{
 
     match try_trades {
         Ok(trades) => {
-            HttpResponse::Ok().json(trades)
+            HttpResponse::Ok().json(TradeResponse{trades})
         },
         Err(e)=> {
             println!("error : {} while fetching trades", e);
