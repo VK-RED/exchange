@@ -104,7 +104,7 @@ fn main() {
                         Ok(message_type) => {
 
                             let market = message_type.get_market();
-                            let channel_to_publish = message_type.get_channel_to_publish();
+                            let channel_to_publish = &message_type.get_channel_to_publish();
 
                             let tx_res = markets_tx.get(market);
 

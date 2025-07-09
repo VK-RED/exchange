@@ -1056,7 +1056,8 @@ impl OrderBook {
 
                 let mut order = Order::from_create_order_payload(payload);
 
-                publish_on_channel = order.id.clone();
+                let order_id = order.id.clone();
+                publish_on_channel = &order_id;
 
                 let res = self.process_order(&mut order, user_balances);
 
@@ -1133,7 +1134,9 @@ impl OrderBook {
             },
 
             MessageFromApi::CancelOrder(order_payload) => {
-                publish_on_channel = order_payload.order_id.clone();
+                let order_id = order_payload.order_id.clone();
+                publish_on_channel = &order_id;
+
                 let market = order_payload.market.clone();
                 let cancel_order_res = self.cancel_order(order_payload, user_balances);
 
@@ -1149,8 +1152,6 @@ impl OrderBook {
                     }
                 };
 
-                let order_id = publish_on_channel.clone();
-
                 redis.publish_message_to_api(publish_on_channel, message);
                 redis.publish_ws_depth(&market, updated_depths);
                 redis.publish_cancel_order_updates(vec![order_id]);
@@ -1158,7 +1159,7 @@ impl OrderBook {
 
             MessageFromApi::CancelAllOrders(payload) => {
 
-                publish_on_channel = payload.user_id.clone();
+                publish_on_channel = &payload.user_id;
                 let market = &payload.market;
                 
                 let mut updated_depths = None;
@@ -1185,7 +1186,7 @@ impl OrderBook {
 
             MessageFromApi::GetAllOpenOrders(payload) => {
 
-                publish_on_channel = payload.user_id.clone();
+                publish_on_channel = &payload.user_id;
 
                 let get_all_orders_res = self.get_all_open_orders(&payload.user_id);
 
@@ -1196,7 +1197,7 @@ impl OrderBook {
             },
 
             MessageFromApi::GetDepth(market) => {
-                publish_on_channel = market.clone();
+                publish_on_channel = &market;
 
                 let depth_res = self.get_depth();
 

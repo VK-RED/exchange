@@ -121,7 +121,7 @@ impl RedisService {
     
     pub fn publish_message_to_api(
         &self,
-        channel:String, 
+        channel:&str, 
         message_res:Result<MessageFromEngine, EngineError>){
 
         let mut conn = self.pool.get().unwrap();
