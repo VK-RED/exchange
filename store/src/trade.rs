@@ -46,5 +46,19 @@ impl Trade {
         Ok(())
     }
 
+    pub async fn get_trades(pool:&Pool<Postgres>) -> Result<Vec<Trade>, Error>{
+        
+        let trades = sqlx::query_as!(
+            Trade,
+            r#"
+                SELECT * FROM "trade" ORDER BY matched_at DESC;
+            "#
+        )
+        .fetch_all(pool)
+        .await;
+
+        trades
+    }
+
 
 }
