@@ -1,4 +1,5 @@
 use std::{collections::{HashMap, HashSet}, sync::{Arc, Mutex}};
+use chrono::Utc;
 use common::{message::{api::{CancelOrderPayload, MessageFromApi}, db_filler::{AddOrderToDb, OrderStatus, Trade, UpdateOrder}, engine::{CancelAllOrders, DepthResponse, MessageFromEngine, OpenOrder, OrderCancelledResponse, OrderFill, OrderPlacedResponse}}, types::order::{Fill, OrderSide, OrderType, Price, Quantity}};
 use rust_decimal::{dec, Decimal, prelude::ToPrimitive};
 use crate::{engine::{AssetBalance, UserAssetBalance}, errors::{EngineError}, order::{Order, OrdersWithQuantity}, services::redis::RedisService};
@@ -1102,14 +1103,15 @@ impl OrderBook {
 
                         for fill in order_placed.fills.iter(){
 
+                            let now = Utc::now();
+
                             let trade = Trade {
                                 id: fill.trade_id,
                                 price: fill.price,
                                 quantity: fill.filled_quantity,
                                 quote_qty: (order.price * fill.filled_quantity).trunc_with_scale(6),
                                 market: self.market.clone(),
-                                // TOD0: FIX THIS
-                                timestamp: 0,
+                                timestamp: now.timestamp_millis(),
                             };
 
                             trades.push(trade);
