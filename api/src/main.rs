@@ -12,7 +12,7 @@ async fn main() {
     dotenv().ok();
 
     let port = std::env::var("PORT").unwrap_or_else(|_e|String::from("8080"));
-    let state = entrypoint::init_app_state();
+    let state = entrypoint::init_app_state().await;
 
     let address = format!("127.0.0.1:{}",port);
     println!("The server is running at the PORT : {}", port);
