@@ -50,7 +50,7 @@ pub struct Trade {
     pub price: Price,
     pub quantity: Quantity,
     pub quote_qty: Quantity,
-    pub timestamp: u32,
+    pub timestamp: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
