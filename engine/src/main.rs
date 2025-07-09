@@ -32,10 +32,8 @@ fn main() {
 
         markets_tx.insert(orderbook.market.clone(), tx);
 
-        let pool_clone = engine.redis_pool.clone();
         let user_balances_clone = Arc::clone(&user_balances);
-
-        let redis_service = RedisService::new(pool_clone);
+        let redis_service = RedisService::new();
 
         println!("Spawning thread for the orderbook : {:?}", &orderbook.market);
 
@@ -63,15 +61,12 @@ fn main() {
 
     println!("Spawning a separate thread for handing non-order-processing requests ...");
 
-    let pool = engine.redis_pool.clone();
-    let redis = RedisService::new(pool);
-
-    let redis_clone = redis.clone();
+    let user_redis_service = RedisService::new();
     
     // this is typically to handle things like user balance, current price queries etc..
     thread::spawn(move ||{
         loop {
-            let try_message = redis_clone.get_user_message_from_api();
+            let try_message = user_redis_service.get_user_message_from_api();
 
             if let Some(message) = try_message {
                 println!("--------------------------------------------------------");
@@ -80,15 +75,17 @@ fn main() {
                 User::process_user_message(
                     message, 
                     Arc::clone(&user_balances),
-                    &redis_clone
+                    &user_redis_service
                 );
             }
         }
     });
 
+    let redis_service = RedisService::new();
+
     loop {
 
-        let res = redis.get_message_from_api();
+        let res = redis_service.get_message_from_api();
 
         match res {
 
@@ -113,7 +110,7 @@ fn main() {
                             match tx_res {
                                 None => {
                                     println!("No tx found for the market : {}", market);
-                                    redis.publish_message_to_api(channel_to_publish, Err(EngineError::InvalidMarket));
+                                    redis_service.publish_message_to_api(channel_to_publish, Err(EngineError::InvalidMarket));
                                 },
                                 Some(tx) => {
                                     let tx_send_err = format!("Error while sending order to the orderbook : {}",market);
