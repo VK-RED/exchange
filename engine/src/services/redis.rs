@@ -1,5 +1,5 @@
 use common::{channel::{DB_CHANNEL, ORDER_CHANNEL, USER_CHANNEL}, message::{db_filler::{AddOrderToDb, DbFillerMessage, Trade, UpdateOrder}, engine::{MessageFromEngine, UserMessageFromEngine}, ws::{DepthUpdate, TradeUpdate, WsMessage}}};
-use r2d2_redis::{r2d2::{Pool, PooledConnection}, redis::{Commands, RedisError}, RedisConnectionManager};
+use r2d2_redis::{r2d2::{self, Pool, PooledConnection}, redis::{Commands, RedisError}, RedisConnectionManager};
 use rust_decimal::Decimal;
 
 use crate::{errors::EngineError, orderbook::PriceWithDepth};
@@ -13,7 +13,10 @@ pub struct RedisService {
 
 impl RedisService {
     
-    pub fn new(pool: Pool<RedisConnectionManager>) -> Self {
+    pub fn new() -> Self {
+        let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_e|String::from("redis://127.0.0.1:6379"));
+        let manager = RedisConnectionManager::new(redis_url).expect("Failed to create redis manager");
+        let pool = r2d2::Pool::builder().build(manager).expect("Failed to create Redis Pool");        
         Self { pool }
     }
 
