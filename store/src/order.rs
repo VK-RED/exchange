@@ -80,6 +80,11 @@ impl Order {
 
     pub async fn update_cancelled_orders(orders:Vec<String>, pool:&Pool<Postgres>) -> Result<(), Error>{
 
+        if orders.len() == 0 {
+            println!("no orders to cancel !");
+            return Ok(());
+        }
+
         let mut query_builder: sqlx::QueryBuilder<'_, Postgres> = sqlx::QueryBuilder::new(r#"
             UPDATE "order"
             SET order_status = 'Cancelled'
