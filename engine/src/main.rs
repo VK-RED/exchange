@@ -1,5 +1,6 @@
 use std::{sync::{mpsc, Arc, Mutex}, thread};
 use common::message::{api::MessageFromApi};
+use dotenv::dotenv;
 
 use crate::{engine::Engine, errors::EngineError, services::redis::RedisService, user::User};
 
@@ -14,6 +15,7 @@ mod user;
 
 fn main() {
 
+    dotenv().ok();
     println!("Starting the engine");
 
     let engine = Engine::init();
