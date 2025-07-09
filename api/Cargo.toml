@@ -16,3 +16,5 @@ uuid ={ workspace = true }
 r2d2 = { workspace = true }
 r2d2_redis = { workspace = true }
 rust_decimal = {workspace = true}
+sqlx = { workspace = true }
+store ={ workspace = true }
