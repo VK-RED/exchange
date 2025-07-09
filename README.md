@@ -64,6 +64,9 @@ The WebSocket server provides real-time data streams. Connect to `ws://127.0.0.1
 *   **Order Book:** Get real-time updates on the order book for a specific market.
 *   **Trades:** Receive live trade updates for a market.
 
+#### Note
+* UserId's - random1, random2, random32 are set with initial balances for ease.
+
 ## Pending Features
 
 *   **OrderBook Recovery**
