@@ -9,17 +9,11 @@ The exchange is a monorepo containing the following crates:
 *   `api`: The public-facing RESTful API built with `actix-web`. It handles user requests, such as placing orders, checking balances, and getting market data.
 *   `engine`: The core matching engine of the exchange. It processes orders, matches trades, and maintains the order book for each market. It's designed for high performance and low latency.
 *   `wss`: A WebSocket server that provides real-time data streams to clients. Users can subscribe to channels to receive live updates on trades, order book changes, and their own user data.
+*   `db_filler`: Fills the market data such as place new orders, updating orders, cancelling orders and adding trades by getting messages from engine.
 *   `store`: Handles all database interactions using `sqlx` with a PostgreSQL database. It's responsible for persisting trades, orders, and user data.
-*   `db_filler`: A utility to populate the database with initial data, such as creating markets or funding user accounts.
 *   `common`: A shared library containing common data structures, types, and utilities used across all other crates.
 
 ## Getting Started
-
-### Prerequisites
-
-*   **Rust:** Install the latest stable version of Rust using `rustup`.
-*   **PostgreSQL:** A relational database for storing persistent data.
-*   **Redis:** An in-memory data store used for message passing between the different components of the exchange.
 
 ### How to Run
 
@@ -43,6 +37,8 @@ The exchange is a monorepo containing the following crates:
     *   **WebSocket Server:** `cargo run --bin wss`
     *   **API Server:** `cargo run --bin api`
 
+#### Screencast
+https://github.com/user-attachments/assets/e69883c6-62d6-4534-aa59-e7369253c2a0
 
 ## API Endpoints
 
