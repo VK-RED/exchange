@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use actix_web::{post, web::{Data, Json}, Responder};
 use common::{
     message::{
@@ -14,7 +16,7 @@ use common::{
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::{entrypoint::AppState, services::redis::{PubSubService, RedisService}, utils::engine_res_wrapper::get_engine_http_response};
+use crate::{entrypoint::AppState, services::redis::{PubSubService, RedisService}, utils::{engine_res_wrapper::get_engine_http_response, observer::Observer}};
 
 #[derive(Deserialize, Debug)]
 pub struct CreateOrder{
@@ -28,6 +30,10 @@ pub struct CreateOrder{
 
 #[post("/order")]
 async fn create_order(payload:Json<CreateOrder>, state:Data<AppState>) -> impl Responder{
+
+    let now = Instant::now();
+    let route = String::from("Place new Order");
+    let observer = Observer::new(now, route);
 
     let guard = &state.redis_pool;
     let conn_1 = guard.get().unwrap();
@@ -54,7 +60,8 @@ async fn create_order(payload:Json<CreateOrder>, state:Data<AppState>) -> impl R
     get_engine_http_response::<OrderPlacedResponse>(
         message_from_api, 
         &mut redis_service, 
-        &mut pub_sub_service
+        &mut pub_sub_service,
+        observer
     )
 
     

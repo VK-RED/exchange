@@ -1,10 +1,18 @@
+use std::time::Instant;
+
 use actix_web::{get, web::{Data, Path}, Responder};
 use common::message::{api::UserMessageFromApi, engine::UserBalanceResponse};
 
-use crate::{entrypoint::AppState, services::redis::{PubSubService, RedisService}, utils::engine_res_wrapper::get_user_engine_http_response};
+use crate::{entrypoint::AppState, services::redis::{PubSubService, RedisService}, utils::{engine_res_wrapper::get_user_engine_http_response, observer::Observer}};
 
 #[get("user/{user_id}/balance")]
 pub async fn get_user_balance(app_state: Data<AppState>, path: Path<String>) -> impl Responder{
+
+    let now = Instant::now();
+    let route = String::from("User Balance");
+    
+    let observer = Observer::new(now, route);
+
     let user_id = path.into_inner();
 
     let guard = &app_state.redis_pool;
@@ -24,6 +32,7 @@ pub async fn get_user_balance(app_state: Data<AppState>, path: Path<String>) -> 
         channel_to_subscribe.clone(), 
         user_message, 
         &mut redis_service, 
-        &mut pub_sub_service
+        &mut pub_sub_service,
+        observer
     )
 }

@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use actix_web::{get, web::Data, HttpResponse,ResponseError};
 use serde::Serialize;
 use store::Trade;
@@ -12,8 +14,14 @@ pub struct TradeResponse{
 #[get("/trades")]
 pub async fn get_trade_history(app_state:Data<AppState>) -> HttpResponse{
 
+    let start_time = Instant::now();
+
     let pool = &app_state.db_pool;
     let try_trades = Trade::get_trades(pool).await;
+
+    let elapsed = start_time.elapsed();
+    
+    println!("Trades route completed in: {}.{} ms", elapsed.as_millis(), elapsed.subsec_micros());
 
     match try_trades {
         Ok(trades) => {

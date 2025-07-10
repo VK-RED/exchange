@@ -1,8 +1,9 @@
+use std::time::Instant;
 use actix_web::{delete, web::{Data, Json}, HttpResponse};
 use common::message::{api::{CancelOrdersPayload, MessageFromApi}, engine::OrdersCancelledResponse};
 use serde::{Deserialize, Serialize};
 
-use crate::{entrypoint::AppState, services::redis::{PubSubService, RedisService}, utils::engine_res_wrapper::get_engine_http_response};
+use crate::{entrypoint::AppState, services::redis::{PubSubService, RedisService}, utils::{engine_res_wrapper::get_engine_http_response, observer::Observer}};
 
 #[derive(Serialize, Deserialize)]
 pub struct CancelAllOrdersPayload {
@@ -12,6 +13,11 @@ pub struct CancelAllOrdersPayload {
 
 #[delete("/order/all")]
 pub async fn cancel_all_orders (app_state:Data<AppState>, json: Json<CancelAllOrdersPayload>) -> HttpResponse {
+
+    let now = Instant::now();
+    let route = String::from("Cancell All Orders");
+    
+    let observer = Observer::new(now, route);
 
     let guard = &app_state.redis_pool;
     let conn_1 = guard.get().unwrap();
@@ -36,7 +42,8 @@ pub async fn cancel_all_orders (app_state:Data<AppState>, json: Json<CancelAllOr
     get_engine_http_response::<OrdersCancelledResponse>(
         message_from_api, 
         &mut redis_service, 
-        &mut pub_sub_service
+        &mut pub_sub_service,
+        observer
     )
 
 }

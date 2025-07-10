@@ -1,8 +1,9 @@
+use std::time::Instant;
 use actix_web::{web::{Data, Json}, HttpResponse, get};
 use common::message::{api::{MessageFromApi, OpenOrdersPayload}, engine::AllOpenOrdersResponse};
 use serde::Deserialize;
 
-use crate::{entrypoint::AppState, errors::CustomApiError, services::redis::{PubSubService, RedisService}, utils::engine_res_wrapper::get_engine_http_response};
+use crate::{entrypoint::AppState, errors::CustomApiError, services::redis::{PubSubService, RedisService}, utils::{engine_res_wrapper::get_engine_http_response, observer::Observer}};
 
 #[derive(Deserialize)]
 pub struct OpenOrders{
@@ -15,6 +16,10 @@ pub async fn get_all_open_orders(
     app_state:Data<AppState>, 
     json: Json<OpenOrders>
 ) -> HttpResponse {
+
+    let now = Instant::now();
+    let route = String::from("Get Open Orders");
+    let observer = Observer::new(now, route);
 
     let pool = &app_state.redis_pool;
     let conn_1_res = pool.get();
@@ -51,7 +56,8 @@ pub async fn get_all_open_orders(
     get_engine_http_response::<AllOpenOrdersResponse>(
         message_from_api, 
         &mut redis_service, 
-        &mut pub_sub_service
+        &mut pub_sub_service,
+        observer
     )
 
 }

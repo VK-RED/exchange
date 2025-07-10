@@ -1,10 +1,16 @@
+use std::time::Instant;
 use actix_web::{get, web::{Data, Path}, HttpResponse};
 use common::message::{api::MessageFromApi, engine::DepthResponse};
 
-use crate::{entrypoint::AppState, errors::CustomApiError, services::redis::{PubSubService, RedisService}, utils::engine_res_wrapper::get_engine_http_response};
+use crate::{entrypoint::AppState, errors::CustomApiError, services::redis::{PubSubService, RedisService}, utils::{engine_res_wrapper::get_engine_http_response, observer::Observer}};
 
 #[get("/depth/{market}")]
 pub async fn get_depth(app_state:Data<AppState>, path:Path<String> ) -> HttpResponse{
+
+    let now = Instant::now();
+    let route = String::from("Depth");
+    
+    let observer = Observer::new(now, route);
 
     let pool = &app_state.redis_pool;
     let conn_1_res = pool.get();
@@ -40,7 +46,8 @@ pub async fn get_depth(app_state:Data<AppState>, path:Path<String> ) -> HttpResp
     get_engine_http_response::<DepthResponse>(
         message_from_api, 
         &mut redis_service, 
-        &mut pub_sub_service
+        &mut pub_sub_service,
+        observer
     )
 
 }
